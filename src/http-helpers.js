@@ -3,6 +3,9 @@ const JSON_HEADERS = {
   'cache-control': 'no-store',
 };
 
+let jwksCache = null;
+let jwksCachedAt = 0;
+
 export function json(data, status = 200, headers = {}) {
   return new Response(JSON.stringify(data), {
     status,
@@ -31,12 +34,72 @@ export async function readJson(request, maxBytes = 64_000) {
   }
 }
 
-export function requireAuth(request, env) {
+function decodeBase64Url(value) {
+  const normalized = value.replace(/-/g, '+').replace(/_/g, '/');
+  const padded = normalized + '='.repeat((4 - normalized.length % 4) % 4);
+  return Uint8Array.from(atob(padded), (char) => char.charCodeAt(0));
+}
+
+function decodeJwtPart(value) {
+  return JSON.parse(new TextDecoder().decode(decodeBase64Url(value)));
+}
+
+async function getAccessKeys(teamDomain) {
+  if (jwksCache && Date.now() - jwksCachedAt < 3_600_000) return jwksCache;
+  const host = teamDomain.replace(/^https?:\/\//, '').replace(/\/$/, '');
+  const response = await fetch(`https://${host}/cdn-cgi/access/certs`);
+  if (!response.ok) throw new Error('unable to load Access public keys');
+  const data = await response.json();
+  jwksCache = data.keys || data.public_certs || [];
+  jwksCachedAt = Date.now();
+  return jwksCache;
+}
+
+async function verifyAccessJwt(token, env) {
+  const parts = token.split('.');
+  if (parts.length !== 3) return null;
+  const header = decodeJwtPart(parts[0]);
+  const payload = decodeJwtPart(parts[1]);
+  if (header.alg !== 'RS256' || !header.kid) return null;
+
+  const audiences = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
+  if (!audiences.includes(env.CF_ACCESS_AUD)) return null;
+  const now = Math.floor(Date.now() / 1000);
+  if (!payload.exp || payload.exp <= now || (payload.nbf && payload.nbf > now)) return null;
+
+  const keys = await getAccessKeys(env.CF_ACCESS_TEAM_DOMAIN);
+  const jwk = keys.find((key) => key.kid === header.kid);
+  if (!jwk) return null;
+  const cryptoKey = await crypto.subtle.importKey(
+    'jwk', jwk, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['verify']
+  );
+  const valid = await crypto.subtle.verify(
+    'RSASSA-PKCS1-v1_5',
+    cryptoKey,
+    decodeBase64Url(parts[2]),
+    new TextEncoder().encode(`${parts[0]}.${parts[1]}`)
+  );
+  return valid ? payload : null;
+}
+
+export async function requireAuth(request, env) {
   if (String(env.REQUIRE_ACCESS).toLowerCase() === 'false') return null;
-  const email = request.headers.get('Cf-Access-Authenticated-User-Email');
+  if (!env.CF_ACCESS_TEAM_DOMAIN || !env.CF_ACCESS_AUD) {
+    return json({ error: 'Cloudflare Access is not configured' }, 503);
+  }
   const assertion = request.headers.get('Cf-Access-Jwt-Assertion');
-  if (!email || !assertion) return json({ error: 'authentication required' }, 401);
-  return null;
+  if (!assertion) return json({ error: 'authentication required' }, 401);
+  try {
+    const payload = await verifyAccessJwt(assertion, env);
+    const email = request.headers.get('Cf-Access-Authenticated-User-Email');
+    if (!payload?.email || !email || payload.email.toLowerCase() !== email.toLowerCase()) {
+      return json({ error: 'invalid Access identity' }, 401);
+    }
+    return null;
+  } catch (error) {
+    console.error('Access verification failed', error);
+    return json({ error: 'authentication verification failed' }, 401);
+  }
 }
 
 const SECURITY_HEADERS = {
