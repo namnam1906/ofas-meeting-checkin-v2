@@ -12,7 +12,7 @@ function escapeHtml(value) {
 }
 
 export async function handleEmailRequest(request, env) {
-  const denied = requireAuth(request, env);
+  const denied = await requireAuth(request, env);
   if (denied) return denied;
   if (request.method !== 'POST') return methodNotAllowed(['POST']);
   if (!env.RESEND_API_KEY) return json({ error: 'RESEND_API_KEY is not configured' }, 503);
