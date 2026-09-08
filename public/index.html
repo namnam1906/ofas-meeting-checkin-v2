@@ -1140,12 +1140,62 @@
       const dataUrl = getBadgeQrDataUrl(a.id);
       const contentBase64 = dataUrl.includes(',') ? dataUrl.split(',')[1] : '';
       const currentEventName = eventName || 'งานอีเวนต์';
+      const detailRows = [
+        a.position ? `<tr><td style="padding:4px 0;color:#6B7280;font-size:13px;">ตำแหน่ง</td><td style="padding:4px 0 4px 16px;color:#1C2340;font-size:13px;text-align:right;">${escapeHtml(a.position)}</td></tr>` : '',
+        a.org ? `<tr><td style="padding:4px 0;color:#6B7280;font-size:13px;">หน่วยงาน</td><td style="padding:4px 0 4px 16px;color:#1C2340;font-size:13px;text-align:right;">${escapeHtml(a.org)}</td></tr>` : '',
+      ].join('');
       const html = `
-        ${testModeOn ? `<p style="color:#B4791C">[โหมดทดสอบ] ฉบับนี้ตั้งใจจะส่งถึง: ${escapeHtml(a.name)} &lt;${escapeHtml(a.email)}&gt;</p>` : ''}
-        <p>สวัสดีคุณ ${escapeHtml(a.name)},</p>
-        <p>นี่คือรหัสสำหรับเช็คอินเข้างาน "${escapeHtml(currentEventName)}"</p>
-        <p>รหัสของคุณคือ: <b>${a.id}</b></p>
-        <p>โปรดแสดงรูป QR Code ที่แนบมานี้ที่หน้างานเพื่อเช็คอิน</p>
+        <!doctype html>
+        <html lang="th">
+        <body style="margin:0;padding:0;background:#F4F2EC;font-family:Arial,'Noto Sans Thai',Tahoma,sans-serif;color:#181C2E;">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#F4F2EC;">
+            <tr>
+              <td align="center" style="padding:28px 12px;">
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width:600px;background:#FFFFFF;border:1px solid #DEDACC;border-radius:12px;overflow:hidden;">
+                  <tr>
+                    <td style="background:#12172B;padding:28px 32px;text-align:center;">
+                      <div style="font-size:11px;letter-spacing:2px;color:#D8B75B;font-weight:bold;">OFAS CHECK-IN</div>
+                      <div style="margin-top:9px;color:#FFFFFF;font-size:23px;line-height:1.4;font-weight:bold;">บัตรเข้าร่วมงานของคุณพร้อมแล้ว</div>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style="padding:30px 32px 12px;text-align:center;">
+                      ${testModeOn ? `<div style="display:inline-block;margin-bottom:18px;padding:7px 12px;background:#FBF0DD;color:#8F6E1F;border-radius:999px;font-size:12px;">โหมดทดสอบ · สำหรับ ${escapeHtml(a.email)}</div>` : ''}
+                      <div style="font-size:14px;color:#666C80;">ลงทะเบียนเข้าร่วม</div>
+                      <div style="margin-top:6px;font-size:21px;line-height:1.5;color:#12172B;font-weight:bold;">${escapeHtml(currentEventName)}</div>
+                      <div style="width:44px;height:3px;background:#B8902E;margin:18px auto 22px;"></div>
+                      <div style="font-size:14px;color:#666C80;">ผู้เข้าร่วมงาน</div>
+                      <div style="margin-top:5px;font-size:19px;line-height:1.5;color:#181C2E;font-weight:bold;">${escapeHtml(a.name)}</div>
+                    </td>
+                  </tr>
+                  ${detailRows ? `<tr><td style="padding:8px 32px 20px;"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width:390px;margin:0 auto;border-top:1px solid #EEEAE0;padding-top:10px;">${detailRows}</table></td></tr>` : ''}
+                  <tr>
+                    <td align="center" style="padding:8px 32px 24px;">
+                      <div style="font-size:13px;color:#666C80;">รหัสลงทะเบียน</div>
+                      <div style="display:inline-block;margin-top:7px;padding:10px 18px;background:#F3E9D2;border:1px solid #D8B75B;border-radius:7px;font-family:Consolas,monospace;font-size:21px;letter-spacing:3px;color:#12172B;font-weight:bold;">${a.id}</div>
+                      ${contentBase64 ? `<div style="margin-top:22px;"><img src="cid:qrCode" width="210" height="210" alt="QR Code ${a.id}" style="display:block;width:210px;height:210px;margin:0 auto;border:12px solid #FFFFFF;outline:1px solid #DEDACC;" /></div>` : ''}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style="padding:20px 32px 30px;text-align:center;">
+                      <div style="background:#FAF9F5;border-radius:8px;padding:16px 18px;font-size:14px;line-height:1.75;color:#454B60;">
+                        กรุณาแสดง QR Code นี้ที่จุดเช็คอินหน้างาน<br>
+                        สามารถเปิดจากอีเมล หรือใช้รูป QR ที่แนบมากับอีเมลได้
+                      </div>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style="border-top:1px solid #EEEAE0;padding:18px 28px;text-align:center;font-size:11px;line-height:1.6;color:#8A8F9E;">
+                      อีเมลฉบับนี้ส่งโดยระบบลงทะเบียนเข้าร่วมงาน OFAS<br>
+                      หาก QR Code ไม่แสดง สามารถแจ้งรหัส ${a.id} แก่เจ้าหน้าที่ได้
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+          </table>
+        </body>
+        </html>
       `;
       const subject = testModeOn
         ? `[ทดสอบ] บัตรเข้างาน: ${currentEventName} (${a.name})`
