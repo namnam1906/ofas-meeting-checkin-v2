@@ -29,9 +29,11 @@ npx wrangler d1 migrations apply ofas-meeting-checkin-v2-db --remote
 ```bash
 npx wrangler secret put RESEND_API_KEY
 npx wrangler secret put EMAIL_FROM
+npx wrangler secret put CF_ACCESS_TEAM_DOMAIN
+npx wrangler secret put CF_ACCESS_AUD
 ```
 
-`EMAIL_FROM` must be a sender on a domain verified by Resend.
+`EMAIL_FROM` must be a sender on a domain verified by Resend. Use the Access team domain (for example `your-team.cloudflareaccess.com`) and the Access application AUD tag for the last two values.
 
 ## 4. Protect the application with Cloudflare Access
 
