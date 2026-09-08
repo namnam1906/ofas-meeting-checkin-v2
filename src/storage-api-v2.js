@@ -201,7 +201,7 @@ export async function createCheckin(rawId, request, env) {
 }
 
 export async function handleCheckinRequest(request, env) {
-  const denied = requireAuth(request, env);
+  const denied = await requireAuth(request, env);
   if (denied) return denied;
   if (request.method !== 'POST') return methodNotAllowed(['POST']);
   const parsed = await readJson(request, 4096);
@@ -212,7 +212,7 @@ export async function handleCheckinRequest(request, env) {
 }
 
 export async function handleStorageRequest(request, env) {
-  const denied = requireAuth(request, env);
+  const denied = await requireAuth(request, env);
   if (denied) return denied;
   const url = new URL(request.url);
   try {
