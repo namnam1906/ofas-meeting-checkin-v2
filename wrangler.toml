@@ -1,0 +1,13 @@
+# Deploy ผ่าน Git integration เท่านั้น (push เข้า main) — อย่า deploy จาก Quick Edit
+# ในหน้า Cloudflare dashboard เพราะจะไม่อ่านค่าจากไฟล์นี้ ทำให้ binding STORAGE_KV หายไป
+name = "ofas-checkin"
+main = "src/worker.js"
+compatibility_date = "2024-09-01"
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+
+[[kv_namespaces]]
+binding = "STORAGE_KV"
+id = "437af7e4878a43de854931c99f435aac"
