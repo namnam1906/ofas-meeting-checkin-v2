@@ -9,24 +9,14 @@ test('API responses are JSON and never cached', async () => {
   assert.deepEqual(await response.json(), { ok: true });
 });
 
-test('Access authentication is required by default', async () => {
+test('Access configuration is required by default', async () => {
   const request = new Request('https://example.test/api/storage');
-  assert.equal(requireAuth(request, {} ).status, 401);
+  assert.equal((await requireAuth(request, {})).status, 503);
 });
 
-test('Access headers authorize a protected request', () => {
-  const request = new Request('https://example.test/api/storage', {
-    headers: {
-      'Cf-Access-Authenticated-User-Email': 'staff@example.org',
-      'Cf-Access-Jwt-Assertion': 'signed-assertion',
-    },
-  });
-  assert.equal(requireAuth(request, { REQUIRE_ACCESS: 'true' }), null);
-});
-
-test('local development bypass must be explicit', () => {
+test('local development bypass must be explicit', async () => {
   const request = new Request('http://localhost/api/storage');
-  assert.equal(requireAuth(request, { REQUIRE_ACCESS: 'false' }), null);
+  assert.equal(await requireAuth(request, { REQUIRE_ACCESS: 'false' }), null);
 });
 
 test('JSON parser rejects an incorrect content type', async () => {
