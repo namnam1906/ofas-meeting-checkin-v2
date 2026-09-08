@@ -1,22 +1,28 @@
-// จุดเข้า Cloudflare Worker เดียวสำหรับทั้งเว็บนี้:
-// - เสิร์ฟไฟล์ static ใน public/ (index.html และไฟล์อื่นๆ) ผ่าน env.ASSETS
-// - ยกเว้น path /api/storage ที่ส่งต่อให้ src/storage-api.js จัดการ (ครอบ Cloudflare KV)
-// - และ path /api/send-email ที่ส่งต่อให้ src/email-api.js จัดการ (ส่งอีเมลผ่าน Resend)
-//
-// บัญชี Cloudflare นี้ deploy โปรเจกต์ผ่าน `wrangler deploy` (รูปแบบ Workers + assets ใหม่)
-// ไม่ใช่ Pages Functions รุ่นเก่า จึงรวม static hosting กับ API ไว้ในไฟล์เดียวนี้แทน
-import { handleStorageRequest } from './storage-api.js';
+import { handleStorageRequest, handleCheckinRequest } from './storage-api-v2.js';
 import { handleEmailRequest } from './email-api.js';
+import { json, withSecurityHeaders } from './http-helpers.js';
 
 export default {
-  async fetch(request, env, ctx) {
+  async fetch(request, env) {
     const url = new URL(request.url);
-    if (url.pathname === '/api/storage') {
-      return handleStorageRequest(request, env);
+    let response;
+
+    if (url.pathname === '/api/health') {
+      try {
+        await env.DB.prepare('SELECT 1').first();
+        response = json({ ok: true, database: 'connected' });
+      } catch {
+        response = json({ ok: false, database: 'unavailable' }, 503);
+      }
+    } else if (url.pathname === '/api/storage') {
+      response = await handleStorageRequest(request, env);
+    } else if (url.pathname === '/api/checkins') {
+      response = await handleCheckinRequest(request, env);
+    } else if (url.pathname === '/api/send-email') {
+      response = await handleEmailRequest(request, env);
+    } else {
+      response = await env.ASSETS.fetch(request);
     }
-    if (url.pathname === '/api/send-email') {
-      return handleEmailRequest(request, env);
-    }
-    return env.ASSETS.fetch(request);
+    return withSecurityHeaders(response);
   },
 };
