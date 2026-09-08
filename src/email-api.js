@@ -1,37 +1,35 @@
-// ตัวจัดการ route /api/send-email: ส่งอีเมลแนบรูป QR ให้ผู้ลงทะเบียน ผ่าน Resend API
-// (Cloudflare Workers เองส่งอีเมลไม่ได้ ต้องพึ่งบริการภายนอก — ใช้ Resend เพราะสมัครง่ายและมี free tier)
+// ตัวจัดการ route /api/send-email: ส่งอีเมลแนบรูป QR ผ่าน Google Apps Script
+// โดย Apps Script จะส่งจากบัญชี Google Workspace ของเจ้าของ deployment
 //
 // Route: POST /api/send-email
 //   body: {
-//     to: string,             อีเมลผู้รับ (จำเป็น)
+//     to: string,
 //     subject: string,
-//     html: string,           เนื้อหาอีเมล (HTML)
-//     attachment: {           แนบไฟล์ QR (ไม่บังคับ)
+//     html: string,
+//     attachment: {
 //       filename: string,
-//       contentBase64: string,   ตัด "data:image/png;base64," ออกก่อนส่งมาแล้ว
+//       contentBase64: string,
 //     }
 //   }
 //
-// ต้องตั้งค่า Secret ชื่อ RESEND_API_KEY ไว้ที่ Cloudflare (Settings > Variables and Secrets)
-// ⚠️ ข้อจำกัดตอนยังไม่ได้ verify โดเมนของหน่วยงานกับ Resend: ต้องส่งจาก
-// "onboarding@resend.dev" (sender ทดสอบของ Resend) และส่งได้ถึงแค่อีเมลที่ใช้สมัคร
-// บัญชี Resend เท่านั้น — ส่งหาอีเมลผู้ลงทะเบียนจริงคนอื่นจะ error จนกว่าจะ verify โดเมนตัวเอง
-// (ดูวิธี verify โดเมนใน README.md)
-//
-// การยืนยันตัวตนของ endpoint นี้ใช้ STORAGE_TOKEN เดียวกับ /api/storage — ดู src/http-helpers.js
+// ต้องตั้ง Cloudflare Secret ชื่อ GOOGLE_APPS_SCRIPT_TOKEN ให้ตรงกับ Script Property
+// ชื่อ API_TOKEN ใน Google Apps Script ห้ามฝังค่านี้ไว้ใน repo หรือในโค้ดฝั่ง browser
 
 import { json, unauthorized, authOk } from './http-helpers.js';
 
-const RESEND_ENDPOINT = 'https://api.resend.com/emails';
-const SANDBOX_FROM = 'onboarding@resend.dev';
+const GOOGLE_APPS_SCRIPT_ENDPOINT =
+  'https://script.google.com/macros/s/AKfycbzMxBeamBvTohljuQIrR1m5aoho2j9IgeaCeWrOGm0ooGVE0vwn38Y2enFwz0oTU775/exec';
 
 export async function handleEmailRequest(request, env) {
   if (request.method.toUpperCase() !== 'POST') {
     return json({ error: 'method not allowed' }, 405);
   }
   if (!authOk(request, env)) return unauthorized();
-  if (!env.RESEND_API_KEY) {
-    return json({ error: 'ยังไม่ได้ตั้งค่า RESEND_API_KEY ที่ฝั่ง Cloudflare' }, 500);
+  if (!env.GOOGLE_APPS_SCRIPT_TOKEN) {
+    return json(
+      { error: 'ยังไม่ได้ตั้งค่า GOOGLE_APPS_SCRIPT_TOKEN ที่ฝั่ง Cloudflare' },
+      500,
+    );
   }
 
   let body;
@@ -42,32 +40,56 @@ export async function handleEmailRequest(request, env) {
   }
 
   const { to, subject, html, attachment } = body || {};
-  if (!to || !subject) return json({ error: 'missing to or subject' }, 400);
+  if (!to || !subject) {
+    return json({ error: 'missing to or subject' }, 400);
+  }
 
   const payload = {
-    from: env.EMAIL_FROM || SANDBOX_FROM,
-    to: [to],
+    token: env.GOOGLE_APPS_SCRIPT_TOKEN,
+    to,
     subject,
     html: html || '',
+    text: 'กรุณาเปิดอีเมลนี้ด้วยโปรแกรมที่รองรับ HTML',
+    attachment,
   };
-  if (attachment && attachment.filename && attachment.contentBase64) {
-    payload.attachments = [
-      { filename: attachment.filename, content: attachment.contentBase64 },
-    ];
+
+  let response;
+  try {
+    response = await fetch(GOOGLE_APPS_SCRIPT_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      redirect: 'follow',
+    });
+  } catch (error) {
+    return json(
+      { error: 'เชื่อมต่อ Google Apps Script ไม่สำเร็จ', detail: String(error) },
+      502,
+    );
   }
 
-  const res = await fetch(RESEND_ENDPOINT, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${env.RESEND_API_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(payload),
+  const data = await response.json().catch(() => null);
+  if (!response.ok) {
+    return json(
+      {
+        error: 'Google Apps Script ตอบกลับไม่สำเร็จ',
+        detail: data || { status: response.status },
+      },
+      502,
+    );
+  }
+  if (!data || !data.ok) {
+    return json(
+      {
+        error: (data && data.error) || 'ส่งอีเมลไม่สำเร็จ',
+        detail: data,
+      },
+      502,
+    );
+  }
+
+  return json({
+    ok: true,
+    remainingQuota: data.remainingQuota,
   });
-
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    return json({ error: data.message || 'ส่งอีเมลไม่สำเร็จ', detail: data }, res.status);
-  }
-  return json({ ok: true, id: data.id });
 }
