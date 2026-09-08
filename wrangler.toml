@@ -1,13 +1,18 @@
-# Deploy ผ่าน Git integration เท่านั้น (push เข้า main) — อย่า deploy จาก Quick Edit
-# ในหน้า Cloudflare dashboard เพราะจะไม่อ่านค่าจากไฟล์นี้ ทำให้ binding STORAGE_KV หายไป
-name = "ofas-checkin"
+name = "ofas-meeting-checkin-v2"
 main = "src/worker.js"
-compatibility_date = "2024-09-01"
+compatibility_date = "2026-08-01"
+workers_dev = true
 
 [assets]
 directory = "./public"
 binding = "ASSETS"
 
-[[kv_namespaces]]
-binding = "STORAGE_KV"
-id = "437af7e4878a43de854931c99f435aac"
+[vars]
+REQUIRE_ACCESS = "true"
+
+# Replace database_id after creating the separate v2 D1 database.
+[[d1_databases]]
+binding = "DB"
+database_name = "ofas-meeting-checkin-v2-db"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+migrations_dir = "migrations"
