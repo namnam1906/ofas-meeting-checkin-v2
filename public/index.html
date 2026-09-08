@@ -1,0 +1,1829 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ระบบลงทะเบียนเข้าร่วมงาน</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<!-- ใช้งานไลบรารีสำหรับ Parse CSV, สร้าง QR Code และอ่าน QR Code -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.7.0/papaparse.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
+<!-- ต้องตั้งค่า Secret ชื่อ STORAGE_TOKEN ที่ค่าเดียวกันนี้ไว้ที่ฝั่ง Cloudflare Worker
+     (Settings > Variables and Secrets) ไม่งั้น /api/storage จะปฏิเสธ request ทั้งหมด (401) -->
+<script>window.STORAGE_CLIENT_TOKEN = '';</script>
+<style>
+  :root{
+    --ink:#12172B;
+    --ink-2:#1C2340;
+    --ink-line: rgba(255,255,255,0.14);
+    --paper:#FAF9F5;
+    --paper-2:#FFFFFF;
+    --line:#DEDACC;
+    --brass:#B8902E;
+    --brass-deep:#8F6E1F;
+    --brass-tint:#F3E9D2;
+    --ok:#1F8A5F;
+    --ok-bg:#E7F4EC;
+    --warn:#B4791C;
+    --warn-bg:#FBF0DD;
+    --err:#C1443C;
+    --err-bg:#FBEAE8;
+    --text:#181C2E;
+    --muted:#666C80;
+    --font-ui:'IBM Plex Sans Thai','Noto Sans Thai','Leelawadee UI',-apple-system,'Segoe UI',Tahoma,sans-serif;
+    --font-mono:'IBM Plex Mono','SFMono-Regular',Consolas,monospace;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    font-family:var(--font-ui);
+    background:var(--paper);
+    color:var(--text);
+    -webkit-font-smoothing:antialiased;
+  }
+  button, input, select, textarea{ font-family:inherit; }
+  button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, [tabindex]:focus-visible{
+    outline:2px solid var(--brass); outline-offset:2px;
+  }
+  ::selection{ background:var(--brass-tint); }
+
+  @media (prefers-reduced-motion: reduce){
+    *{ animation-duration:0.001ms !important; transition-duration:0.001ms !important; }
+  }
+
+  /* ---------- header ---------- */
+  header.topbar{
+    background:var(--ink);
+    color:#fff;
+    padding:18px 24px;
+  }
+  .topbar-inner{
+    max-width:1080px;
+    margin:0 auto;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:24px;
+    flex-wrap:wrap;
+  }
+  .brand{ display:flex; flex-direction:column; gap:2px; }
+  .brand-title{ font-size:19px; font-weight:600; letter-spacing:0.01em; }
+  .brand-sub{ font-size:12.5px; color:rgba(255,255,255,0.55); }
+  .event-name-field{
+    display:flex; align-items:baseline; gap:8px; flex:1 1 260px; max-width:360px;
+  }
+  .event-name-field label{ font-size:12.5px; color:rgba(255,255,255,0.55); white-space:nowrap; }
+  .event-name-field input{
+    background:transparent; border:none; border-bottom:1px solid var(--ink-line);
+    color:#fff; font-size:15px; padding:4px 2px; width:100%;
+  }
+  .event-name-field input::placeholder{ color:rgba(255,255,255,0.35); }
+  .event-name-field input:focus{ border-bottom-color:var(--brass); outline:none; }
+  .stat-trio{ display:flex; gap:22px; }
+  .stat-trio .stat{ text-align:right; }
+  .stat-trio .stat b{ display:block; font-size:20px; font-weight:600; line-height:1.1; }
+  .stat-trio .stat span{ font-size:11.5px; color:rgba(255,255,255,0.5); }
+  .stat-trio .stat.ok b{ color:#7FD9AC; }
+
+  /* ---------- tabs ---------- */
+  nav.tabs{
+    background:var(--paper-2);
+    border-bottom:1px solid var(--line);
+    position:sticky; top:0; z-index:5;
+  }
+  .tabs-inner{ max-width:1080px; margin:0 auto; display:flex; gap:4px; padding:0 20px; overflow-x:auto; }
+  .tab-btn{
+    background:none; border:none; cursor:pointer;
+    padding:14px 6px; margin-right:22px;
+    font-size:14.5px; color:var(--muted); font-weight:500;
+    border-bottom:2.5px solid transparent;
+    white-space:nowrap;
+  }
+  .tab-btn.active{ color:var(--text); border-bottom-color:var(--brass); }
+  .tab-btn:hover{ color:var(--text); }
+
+  main{ max-width:1080px; margin:0 auto; padding:28px 20px 80px; }
+  .panel{ display:none; }
+  .panel.active{ display:block; }
+
+  h2.panel-title{ font-size:20px; font-weight:600; margin:0 0 4px; }
+  p.panel-hint{ font-size:13.5px; color:var(--muted); margin:0 0 22px; max-width:64ch; line-height:1.6; }
+
+  .empty-hint{
+    border:1px dashed var(--line); padding:28px 22px; font-size:13.5px; color:var(--muted);
+    line-height:1.7; background:var(--paper-2);
+  }
+
+  /* ---------- import panel ---------- */
+  .method-switch{ display:flex; gap:0; border:1px solid var(--line); width:fit-content; margin-bottom:18px; }
+  .method-switch button{
+    background:var(--paper-2); border:none; cursor:pointer; padding:9px 16px;
+    font-size:13px; color:var(--muted); border-right:1px solid var(--line);
+  }
+  .method-switch button:last-child{ border-right:none; }
+  .method-switch button.active{ background:var(--ink); color:#fff; }
+
+  .import-box{ border:1px solid var(--line); background:var(--paper-2); padding:20px; margin-bottom:18px; }
+  .import-box textarea{
+    width:100%; min-height:120px; border:1px solid var(--line); padding:10px; font-size:13px;
+    font-family:var(--font-mono); resize:vertical; background:var(--paper);
+  }
+  .import-box input[type=text]{
+    width:100%; border:1px solid var(--line); padding:9px 10px; font-size:13.5px; background:var(--paper);
+  }
+  .import-box input[type=file]{ font-size:13px; }
+  .field-row{ display:flex; flex-direction:column; gap:6px; margin-bottom:12px; }
+  .field-row label{ font-size:12.5px; color:var(--muted); }
+  .btn-row{ display:flex; gap:10px; margin-top:14px; flex-wrap:wrap; align-items:center; }
+
+  .btn{
+    border:1px solid var(--ink); background:var(--ink); color:#fff;
+    padding:10px 18px; font-size:13.5px; font-weight:500; cursor:pointer;
+  }
+  .btn:hover{ background:#232a4a; }
+  .btn:disabled{ opacity:0.35; cursor:not-allowed; }
+  .btn.brass{ background:var(--brass); border-color:var(--brass); }
+  .btn.brass:hover{ background:var(--brass-deep); }
+  .btn.ghost{ background:transparent; color:var(--text); border-color:var(--line); }
+  .btn.ghost:hover{ background:var(--paper); }
+  .btn.danger{ background:transparent; color:var(--err); border-color:var(--err); }
+  .btn.danger:hover{ background:var(--err-bg); }
+  .btn.small{ padding:6px 12px; font-size:12.5px; }
+
+  .mapping-grid{ display:grid; grid-template-columns:repeat(auto-fit, minmax(180px,1fr)); gap:14px; margin:16px 0; }
+  select{ width:100%; border:1px solid var(--line); padding:8px 8px; font-size:13.5px; background:var(--paper-2); }
+
+  .preview-scroll{ max-height:360px; overflow-y:auto; overflow-x:auto; margin-top:10px; border:1px solid var(--line); }
+  table.preview{ width:100%; border-collapse:collapse; font-size:12.5px; }
+  table.preview th, table.preview td{ text-align:left; border-bottom:1px solid var(--line); padding:7px 8px; white-space:nowrap; }
+  table.preview th{ color:var(--muted); font-weight:500; background:var(--paper-2); position:sticky; top:0; }
+  table.preview td.name{ font-weight:500; }
+  table.preview td:first-child, table.preview th:first-child{ color:var(--muted); text-align:right; padding-right:10px; }
+  .import-note{ font-size:12px; color:var(--muted); margin-top:8px; }
+
+  /* ---------- badge / ticket stub ---------- */
+  .badges-toolbar{ display:flex; align-items:center; flex-wrap:wrap; gap:14px; margin-bottom:12px; }
+  .badges-toolbar .count{ font-size:12.5px; color:var(--muted); }
+  .badges-actions{ display:flex; flex-wrap:wrap; gap:10px; margin-bottom:18px; }
+
+  /* ---------- selection bar (เปิดใช้หลังกดปุ่ม action) ---------- */
+  .selection-bar{
+    display:flex; align-items:center; flex-wrap:wrap; gap:14px;
+    padding:12px 14px; margin-bottom:18px; background:var(--brass-tint); border:1px solid var(--brass);
+  }
+  .selection-bar[hidden]{ display:none; }
+  .selection-bar-label{ font-size:13px; font-weight:500; color:var(--brass-deep); }
+  .select-all-label{ display:flex; align-items:center; gap:6px; font-size:13px; cursor:pointer; user-select:none; }
+  .selected-count{ font-size:12.5px; color:var(--text); }
+  .selection-bar-buttons{ display:flex; gap:8px; margin-left:auto; }
+  .test-mode-row{
+    display:flex; align-items:center; gap:6px; font-size:12.5px; color:var(--text);
+    width:100%; padding-top:10px; margin-top:2px; border-top:1px solid var(--brass);
+    cursor:pointer; user-select:none;
+  }
+  .test-mode-row[hidden]{ display:none; }
+  .test-mode-row input[type=email]{
+    border:1px solid var(--line); padding:5px 8px; font-size:12.5px; background:var(--paper-2);
+    width:200px; cursor:text;
+  }
+
+  /* ---------- generic confirm modal (ใช้กับยืนยันเช็คอินจากการสแกน) ---------- */
+  .modal-overlay{
+    position:fixed; inset:0; background:rgba(18,23,43,0.55); z-index:60;
+    display:flex; align-items:center; justify-content:center; padding:20px;
+  }
+  .modal-overlay[hidden]{ display:none; }
+  .modal-box{
+    background:var(--paper-2); border:1px solid var(--line); padding:22px; max-width:360px; width:100%;
+    box-shadow:0 12px 32px rgba(0,0,0,0.22);
+  }
+  .modal-message{ font-size:14px; line-height:1.7; margin:0 0 16px; }
+  .modal-message b{ font-size:16px; }
+  .modal-actions{ display:flex; flex-direction:column; gap:8px; }
+  .modal-actions .btn{ width:100%; }
+
+  .badges-grid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(340px, 1fr)); gap:16px; }
+  .badge-card{
+    display:flex; background:var(--paper-2); border:1px solid var(--line); position:relative;
+    break-inside:avoid; page-break-inside:avoid;
+  }
+  .badge-card.selected{ outline:2px solid var(--brass); outline-offset:-1px; }
+  .badge-select{
+    display:none; position:absolute; top:8px; left:8px; z-index:2; width:20px; height:20px;
+    align-items:center; justify-content:center;
+    background:var(--paper-2); border:1px solid var(--line); border-radius:4px;
+  }
+  .badge-select input{ width:15px; height:15px; margin:0; cursor:pointer; }
+  #badgesGrid.selecting .badge-select{ display:flex; }
+  #badgesGrid.selecting .badge-info{ padding-left:38px; }
+  .badge-info{ flex:1 1 60%; padding:18px 18px; display:flex; flex-direction:column; gap:5px; justify-content:center; min-width:0; }
+  .badge-event{ font-size:10.5px; letter-spacing:0.02em; color:var(--brass-deep); font-weight:500; }
+  .badge-name{ font-size:17px; font-weight:600; line-height:1.3; overflow-wrap:break-word; }
+  .badge-position{ font-size:13px; color:var(--text); }
+  .badge-org{ font-size:12px; color:var(--muted); }
+  .badge-code{ font-family:var(--font-mono); font-size:11.5px; color:var(--muted); margin-top:6px; letter-spacing:0.06em; display: flex; align-items: center; justify-content: space-between; }
+  .btn-email{ display: inline-flex; align-items: center; gap: 4px; padding: 4px 8px; font-size: 11px; background: var(--paper); border: 1px solid var(--line); border-radius: 4px; color: var(--text); text-decoration: none; font-family: var(--font-ui); letter-spacing: 0; cursor: pointer; }
+  .btn-email:hover{ background: var(--line); color: var(--ink); }
+  .badge-stub{
+    flex:0 0 38%; border-left:2px dashed var(--line); position:relative;
+    display:flex; align-items:center; justify-content:center; padding:14px;
+  }
+  .badge-stub::before, .badge-stub::after{
+    content:''; position:absolute; left:-9px; width:18px; height:18px; border-radius:50%;
+    background:var(--paper); border:1px solid var(--line);
+  }
+  .badge-stub::before{ top:-9px; }
+  .badge-stub::after{ bottom:-9px; }
+  .qr-box{ padding:7px; border:1.5px solid var(--brass); background:#fff; line-height:0; }
+
+  /* ---------- checkin panel ---------- */
+  .checkin-grid{ display:grid; grid-template-columns:minmax(260px,380px) 1fr; gap:26px; align-items:start; }
+  @media (max-width:760px){ .checkin-grid{ grid-template-columns:1fr; } }
+
+  .scanner-card{ background:var(--ink); padding:18px; }
+  .scanner-frame{
+    position:relative; aspect-ratio:1/1; background:#000; overflow:hidden;
+    border:1px solid var(--ink-line);
+  }
+  .scanner-frame #reader{ width:100%; height:100%; }
+  /* แก้ไขให้แคนวาสของ scanner แสดงผลได้สมบูรณ์ในกรอบ */
+  .scanner-frame #reader video { object-fit: cover; }
+
+  .scanner-frame::before{
+    content:''; position:absolute; inset:14%; pointer-events:none; z-index:3;
+    border:2px solid var(--brass); opacity:0.9;
+    box-shadow: 0 0 0 4000px rgba(0,0,0,0);
+  }
+  .scanner-frame.flash-ok::before{ border-color:#5FE3A0; }
+  .scanner-frame.flash-err::before{ border-color:#F0776D; }
+  .scanner-frame.flash-warn::before{ border-color:#F0C168; }
+  .scanner-placeholder{
+    position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    color:rgba(255,255,255,0.4); font-size:12.5px; text-align:center; padding:20px; z-index:2;
+  }
+  .scanner-status{ color:rgba(255,255,255,0.65); font-size:12px; margin-top:12px; min-height:16px; }
+  .scanner-actions{ display:flex; gap:8px; margin-top:12px; }
+  .scanner-actions .btn{ flex:1; }
+  .file-scan-row{ margin-top:14px; padding-top:14px; border-top:1px solid var(--ink-line); }
+  .file-scan-row label{ display:block; font-size:11.5px; color:rgba(255,255,255,0.5); margin-bottom:6px; }
+  .file-scan-row input[type=file]{ font-size:11.5px; color:rgba(255,255,255,0.75); width:100%; }
+
+  .stat-strip{ display:flex; border:1px solid var(--line); background:var(--paper-2); margin-bottom:18px; }
+  .stat-strip .cell{ flex:1; padding:14px 16px; text-align:center; }
+  .stat-strip .cell + .cell{ border-left:1px solid var(--line); }
+  .stat-strip .cell b{ display:block; font-size:24px; font-weight:600; }
+  .stat-strip .cell span{ font-size:11.5px; color:var(--muted); }
+  .stat-strip .cell.ok b{ color:var(--ok); }
+
+  .search-box{ margin-bottom:12px; }
+  .search-box input{ width:100%; border:1px solid var(--line); padding:10px 12px; font-size:14px; background:var(--paper-2); }
+  .result-row{
+    display:flex; align-items:center; justify-content:space-between; gap:10px;
+    padding:10px 12px; border:1px solid var(--line); border-top:none; background:var(--paper-2);
+  }
+  .result-row:first-of-type{ border-top:1px solid var(--line); }
+  .result-info b{ display:block; font-size:13.5px; }
+  .result-info span{ font-size:11.5px; color:var(--muted); }
+  .result-row .btn{ flex-shrink:0; }
+  .badge-pill{
+    font-size:11px; padding:4px 10px; border-radius:2px; font-weight:500;
+  }
+  .badge-pill.ok{ background:var(--ok-bg); color:var(--ok); }
+
+  .log-section{ margin-top:22px; }
+  .log-section-header{ display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; }
+  .log-section-header h3{ font-size:13px; font-weight:600; margin:0; color:var(--muted); }
+  .log-list{ display:flex; flex-direction:column; gap:0; max-height:280px; overflow-y:auto; border:1px solid var(--line); background:var(--paper-2); }
+  .log-row{ display:flex; align-items:center; gap:8px; padding:9px 12px; font-size:12.5px; border-bottom:1px solid var(--line); }
+  .log-row:last-child{ border-bottom:none; }
+  .log-row-name{ flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .log-row .t{ color:var(--muted); font-family:var(--font-mono); font-size:11.5px; flex-shrink:0; }
+  .log-empty{ padding:18px 12px; font-size:12.5px; color:var(--muted); text-align:center; }
+  .log-actions{ display:flex; align-items:center; justify-content:space-between; gap:10px; margin-top:10px; flex-wrap:wrap; }
+
+  .danger-zone{ margin-top:34px; padding-top:18px; border-top:1px solid var(--line); }
+  .danger-zone p{ font-size:12px; color:var(--muted); margin:0 0 8px; }
+
+  /* ---------- toast ---------- */
+  #toast-stack{
+    position:fixed; bottom:18px; left:50%; transform:translateX(-50%);
+    display:flex; flex-direction:column; gap:8px; z-index:50; align-items:center;
+  }
+  .toast{
+    padding:10px 18px; font-size:13px; border-radius:2px; color:#fff; background:var(--ink);
+    box-shadow:0 4px 14px rgba(0,0,0,0.18);
+  }
+  .toast.ok{ background:var(--ok); }
+  .toast.err{ background:var(--err); }
+  .toast.warn{ background:var(--warn); }
+
+  .loading-note{ font-size:13px; color:var(--muted); padding:20px 0; }
+
+  /* ---------- print ---------- */
+  @media print{
+    header.topbar, nav.tabs, .badges-toolbar, .badges-actions, .selection-bar, .badge-select, .danger-zone, #toast-stack{ display:none !important; }
+    body{ background:#fff; }
+    main{ padding:0; max-width:none; }
+    .panel{ display:none !important; }
+    .panel.print-target{ display:block !important; }
+    .badges-grid{ grid-template-columns:repeat(2, 1fr); gap:10px; }
+    .badge-card{ border:1px solid #999; }
+    .badges-grid.print-selected-only .badge-card:not(.print-only){ display:none !important; }
+  }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <div class="brand-title">ระบบลงทะเบียนเข้าร่วมงาน</div>
+      <div class="brand-sub">นำเข้ารายชื่อ · ออกบัตร QR · เช็คอินเข้างาน</div>
+    </div>
+    <div class="event-name-field">
+      <label for="eventNameInput">ชื่องาน</label>
+      <input id="eventNameInput" type="text" placeholder="เช่น งานสัมมนาประจำปี 2569">
+    </div>
+    <div class="stat-trio">
+      <div class="stat"><b id="headerTotal">0</b><span>ลงทะเบียน</span></div>
+      <div class="stat ok"><b id="headerCheckedIn">0</b><span>เช็คอินแล้ว</span></div>
+    </div>
+  </div>
+</header>
+
+<nav class="tabs">
+  <div class="tabs-inner">
+    <button class="tab-btn active" data-tab="import">นำเข้ารายชื่อ</button>
+    <button class="tab-btn" data-tab="badges">ออกบัตร QR</button>
+    <button class="tab-btn" data-tab="checkin">จุดเช็คอิน</button>
+  </div>
+</nav>
+
+<main>
+
+  <!-- ================= IMPORT PANEL ================= -->
+  <section class="panel active" id="panel-import">
+    <h2 class="panel-title">นำเข้ารายชื่อจาก Google Form</h2>
+    <p class="panel-hint">นำข้อมูลผู้ตอบแบบฟอร์มมาเข้าระบบ เลือกวิธีใดวิธีหนึ่ง แล้วตรวจสอบคอลัมน์ก่อนนำเข้าจริง ระบบจะตรวจอีเมลซ้ำให้อัตโนมัติ ไม่สร้างรายชื่อซ้ำ</p>
+
+    <div class="method-switch" id="methodSwitch">
+      <button class="active" data-method="file">อัปโหลดไฟล์ CSV</button>
+      <button data-method="link">ลิงก์ Google Sheet (CSV)</button>
+      <button data-method="paste">วางข้อความ CSV</button>
+    </div>
+
+    <div class="import-box" id="importBoxFile">
+      <div class="field-row">
+        <label>อัปโหลดไฟล์ที่ export จาก Google ฟอร์ม → การตอบกลับ → Google ชีต → ดาวน์โหลดเป็น .csv</label>
+        <input type="file" id="fileInput" accept=".csv,text/csv">
+      </div>
+    </div>
+
+    <div class="import-box" id="importBoxLink" style="display:none;">
+      <div class="field-row">
+        <label>วางลิงก์จาก Google ชีต (ไฟล์ &gt; แชร์ &gt; เผยแพร่สู่เว็บ &gt; เลือกรูปแบบ CSV) ต้องเป็นชีตสาธารณะจึงจะดึงได้</label>
+        <input type="text" id="linkInput" placeholder="https://docs.google.com/spreadsheets/d/e/.../pub?output=csv">
+      </div>
+      <div class="btn-row">
+        <button class="btn ghost small" id="fetchLinkBtn">ดึงข้อมูล</button>
+      </div>
+    </div>
+
+    <div class="import-box" id="importBoxPaste" style="display:none;">
+      <div class="field-row">
+        <label>คัดลอกข้อมูลจาก Google ชีตแล้ววางที่นี่ (รวมแถวหัวตาราง)</label>
+        <textarea id="pasteInput" placeholder="ประทับเวลา,คำนำหน้า,ชื่อ-นามสกุล,ตำแหน่ง,หน่วยงาน,อีเมล,เบอร์โทร&#10;..."></textarea>
+      </div>
+      <div class="btn-row">
+        <button class="btn ghost small" id="parsePasteBtn">อ่านข้อมูล</button>
+      </div>
+    </div>
+
+    <div id="mappingSection" style="display:none;">
+      <p class="import-note" id="parseSummary"></p>
+      <div class="mapping-grid">
+        <div class="field-row">
+          <label>ประทับเวลา (วันที่ลงทะเบียน)</label>
+          <select id="mapTimestamp"></select>
+        </div>
+        <div class="field-row">
+          <label>คำนำหน้าชื่อ</label>
+          <select id="mapTitle"></select>
+        </div>
+        <div class="field-row">
+          <label>ชื่อ-นามสกุล (จำเป็น)</label>
+          <select id="mapName"></select>
+        </div>
+        <div class="field-row">
+          <label>ตำแหน่ง</label>
+          <select id="mapPosition"></select>
+        </div>
+        <div class="field-row">
+          <label>สังกัด หรือ หน่วยงาน</label>
+          <select id="mapOrg"></select>
+        </div>
+        <div class="field-row">
+          <label>อีเมล (ใช้ตรวจซ้ำ)</label>
+          <select id="mapEmail"></select>
+        </div>
+        <div class="field-row">
+          <label>เบอร์โทร</label>
+          <select id="mapPhone"></select>
+        </div>
+      </div>
+      <div class="preview-scroll">
+        <table class="preview" id="previewTable"></table>
+      </div>
+      <div class="btn-row">
+        <button class="btn brass" id="confirmImportBtn">นำเข้ารายชื่อนี้</button>
+        <button class="btn ghost" id="cancelImportBtn">ยกเลิก</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= BADGES PANEL ================= -->
+  <section class="panel print-target" id="panel-badges">
+    <h2 class="panel-title">ออกบัตร QR สำหรับผู้ลงทะเบียน</h2>
+    <p class="panel-hint">แต่ละคนจะได้รหัส QR เฉพาะตัวสำหรับใช้เช็คอินหน้างาน พิมพ์ออกมาเป็นบัตรหรือแสดงหน้าจอให้สแกนก็ได้</p>
+    <div class="badges-toolbar">
+      <span class="count" id="badgeCount"></span>
+    </div>
+    <div class="badges-actions" id="actionButtons">
+      <button class="btn brass small" id="printBtn">พิมพ์บัตร</button>
+      <button class="btn ghost small" id="emailBtn">ส่งอีเมล QR</button>
+      <button class="btn ghost small" id="exportRosterBtn">📥 ดาวน์โหลดข้อมูล</button>
+      <button class="btn danger small" id="deleteBtn">ลบข้อมูล</button>
+    </div>
+    <div class="selection-bar" id="selectionBar" hidden>
+      <span class="selection-bar-label" id="selectionBarLabel"></span>
+      <label class="select-all-label">
+        <input type="checkbox" id="selectAllBadges">
+        เลือกทั้งหมด
+      </label>
+      <span class="selected-count" id="selectedCount"></span>
+      <div class="selection-bar-buttons">
+        <button class="btn brass small" id="confirmSelectionBtn"></button>
+        <button class="btn ghost small" id="cancelSelectionBtn">ยกเลิก</button>
+      </div>
+      <label class="test-mode-row" id="emailTestModeRow" hidden>
+        <input type="checkbox" id="emailTestModeCheckbox">
+        โหมดทดสอบ: ส่งทุกฉบับไปที่
+        <input type="email" id="emailTestModeAddress" placeholder="you@example.com">
+      </label>
+    </div>
+    <div class="badges-grid" id="badgesGrid"></div>
+  </section>
+
+  <!-- ================= CHECKIN PANEL ================= -->
+  <section class="panel" id="panel-checkin">
+    <h2 class="panel-title">จุดเช็คอินหน้างาน</h2>
+    <p class="panel-hint">สแกน QR จากบัตร หรือค้นหารายชื่อด้วยมือ ข้อมูลเช็คอินจะซิงก์กับทุกอุปกรณ์ที่เปิดหน้านี้ร่วมกัน</p>
+
+    <div class="checkin-grid">
+      <div class="scanner-card">
+        <div class="scanner-frame" id="scannerFrame">
+          <div id="reader"></div>
+          <div class="scanner-placeholder" id="scannerPlaceholder">กดเริ่มสแกนเพื่อเปิดกล้อง</div>
+        </div>
+        <div class="scanner-status" id="scannerStatus"></div>
+        <div class="scanner-actions">
+          <button class="btn brass" id="startScanBtn">เริ่มสแกน</button>
+          <button class="btn ghost" id="stopScanBtn" style="display:none;">หยุดสแกน</button>
+        </div>
+        <div class="file-scan-row">
+          <label>ไม่มีกล้อง? สแกนจากไฟล์รูปภาพแทน</label>
+          <input type="file" id="scanFileInput" accept="image/*">
+        </div>
+      </div>
+
+      <div class="checkin-side">
+        <div class="stat-strip">
+          <div class="cell"><b id="statTotal">0</b><span>ทั้งหมด</span></div>
+          <div class="cell ok"><b id="statCheckedIn">0</b><span>เช็คอินแล้ว</span></div>
+          <div class="cell"><b id="statRemaining">0</b><span>คงเหลือ</span></div>
+        </div>
+
+        <div class="search-box">
+          <input type="text" id="searchInput" placeholder="ค้นหาชื่อ อีเมล เบอร์โทร หรือรหัส แล้วกดเช็คอิน">
+        </div>
+        <div id="searchResults"></div>
+
+        <div class="log-section">
+          <div class="log-section-header">
+            <h3>รายการเช็คอินล่าสุด</h3>
+            <button class="btn ghost small" id="refreshCheckinBtn">🔄 รีเฟรช</button>
+          </div>
+          <div class="log-list" id="logList"><div class="log-empty">ยังไม่มีการเช็คอิน</div></div>
+          <div class="log-actions">
+            <label class="select-all-label">
+              <input type="checkbox" id="selectAllLogBadges">
+              เลือกทั้งหมด
+            </label>
+            <button class="btn danger small" id="undoCheckinBtn" disabled>ลบรายการที่เลือก (ยกเลิกเช็คอิน)</button>
+          </div>
+        </div>
+
+        <div class="export-zone" style="margin-top:22px; padding-top:18px; border-top:1px solid var(--line);">
+          <p style="font-size:12px; color:var(--muted); margin:0 0 8px;">ส่งออกข้อมูลผู้ที่เช็คอินแล้วเป็นไฟล์ CSV (เปิดด้วย Excel ได้)</p>
+          <button class="btn brass small" id="exportBtn">📥 ดาวน์โหลดรายงานเช็คอิน</button>
+        </div>
+
+        <div class="danger-zone">
+          <p>ล้างรายชื่อและสถานะเช็คอินทั้งหมดของงานนี้ เพื่อเริ่มงานใหม่</p>
+          <button class="btn danger small" id="resetBtn">ล้างข้อมูลทั้งหมด</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<div id="toast-stack"></div>
+
+<!-- ================= CHECKIN CONFIRM MODAL ================= -->
+<div class="modal-overlay" id="checkinConfirmModal" hidden>
+  <div class="modal-box">
+    <p class="modal-message" id="checkinConfirmMessage"></p>
+    <div class="modal-actions">
+      <button class="btn brass small" id="checkinConfirmYes">ยืนยันเช็คอิน</button>
+      <button class="btn ghost small" id="checkinConfirmNo">ยกเลิก</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  // ---------------- storage helpers ----------------
+  // เดิมเรียก window.storage ของ Claude Artifacts เท่านั้น ตอนนี้ยิง fetch() ไปที่
+  // Cloudflare Pages Function /api/storage (ดู functions/api/storage.js) ซึ่งครอบ
+  // Cloudflare KV ไว้ให้ — โค้ดส่วนอื่นทั้งหมดในไฟล์นี้ไม่ต้องแก้ เพราะเรียกผ่าน
+  // storeGet/storeSet/storeDelete/storeList อยู่แล้ว
+  const STORAGE_API = '/api/storage';
+  // ถ้าตั้งค่า STORAGE_TOKEN ไว้ฝั่ง Pages Function ให้ตั้งค่าเดียวกันไว้ที่นี่ด้วย
+  // (ดูรายละเอียดเรื่องความปลอดภัยใน README.md — วิธีนี้เป็นแค่การกันเบื้องต้น
+  // ไม่ใช่ระบบยืนยันตัวตนที่ปลอดภัยจริง เพราะ token จะฝังอยู่ในโค้ดฝั่งไคลเอนต์)
+  const STORAGE_TOKEN = window.STORAGE_CLIENT_TOKEN || '';
+
+  function apiHeaders(extra){
+    const h = Object.assign({}, extra || {});
+    if(STORAGE_TOKEN) h['X-Storage-Token'] = STORAGE_TOKEN;
+    return h;
+  }
+  async function storeGet(key /*, shared */){
+    try{
+      const res = await fetch(STORAGE_API + '?key=' + encodeURIComponent(key), { headers: apiHeaders() });
+      if(!res.ok) return null;
+      const data = await res.json();
+      return data ? data.value : null;
+    } catch(e){ return null; }
+  }
+  async function storeSet(key, value /*, shared */){
+    try{
+      const res = await fetch(STORAGE_API, {
+        method: 'PUT',
+        headers: apiHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ key, value }),
+      });
+      return res.ok;
+    } catch(e){ console.error('storage.set failed', key, e); return false; }
+  }
+  async function storeDelete(key /*, shared */){
+    try{
+      const res = await fetch(STORAGE_API + '?key=' + encodeURIComponent(key), {
+        method: 'DELETE',
+        headers: apiHeaders(),
+      });
+      return res.ok;
+    } catch(e){ return false; }
+  }
+  async function storeList(prefix /*, shared */){
+    try{
+      const res = await fetch(STORAGE_API + '?prefix=' + encodeURIComponent(prefix), { headers: apiHeaders() });
+      if(!res.ok) return [];
+      const data = await res.json();
+      return (data && data.keys) ? data.keys : [];
+    } catch(e){ return []; }
+  }
+
+  // ---------------- state ----------------
+  let eventName = '';
+  let roster = [];              // [{id,name,email,phone,position,org}]
+  let checkedInIds = new Set(); // ids with a checkin:<id> key
+  let pendingImport = null;     // {fields, rows}
+  let html5QrCode = null;
+  let scannerRunning = false;
+  let lastScannedCode = '', lastScannedAt = 0;
+  let checkinPollTimer = null;
+  let selectedBadgeIds = new Set(); // ids ที่ติ๊กเลือกไว้ระหว่างอยู่ในโหมดเลือกของแท็บออกบัตร QR
+  let selectionAction = null;       // 'print' | 'email' | 'delete' | null (null = ยังไม่ได้กดปุ่ม action ใดๆ)
+
+  const ID_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  function generateId(existingIds){
+    let id;
+    do{
+      id = Array.from({length:6}, ()=> ID_ALPHABET[Math.floor(Math.random()*ID_ALPHABET.length)]).join('');
+    } while(existingIds.has(id));
+    return id;
+  }
+  function escapeHtml(s){
+    return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  // ---------------- toast ----------------
+  function showToast(msg, kind){
+    const stack = document.getElementById('toast-stack');
+    const el = document.createElement('div');
+    el.className = 'toast' + (kind ? ' ' + kind : '');
+    el.textContent = msg;
+    stack.appendChild(el);
+    setTimeout(()=>{ el.remove(); }, 3200);
+  }
+
+  // ---------------- tabs ----------------
+  const tabButtons = Array.from(document.querySelectorAll('.tab-btn'));
+  const panels = {
+    import: document.getElementById('panel-import'),
+    badges: document.getElementById('panel-badges'),
+    checkin: document.getElementById('panel-checkin'),
+  };
+  function activateTab(name){
+    tabButtons.forEach(b=> b.classList.toggle('active', b.dataset.tab === name));
+    Object.keys(panels).forEach(k=> panels[k].classList.toggle('active', k === name));
+    if(name !== 'checkin'){
+      stopScanner();
+      stopCheckinPolling();
+    } else {
+      startCheckinPolling();
+      renderCheckinStats();
+    }
+  }
+  tabButtons.forEach(b=> b.addEventListener('click', ()=> activateTab(b.dataset.tab)));
+
+  // ---------------- header / event name ----------------
+  const eventNameInput = document.getElementById('eventNameInput');
+  let eventNameSaveTimer = null;
+  eventNameInput.addEventListener('input', ()=>{
+    eventName = eventNameInput.value;
+    clearTimeout(eventNameSaveTimer);
+    eventNameSaveTimer = setTimeout(()=>{ storeSet('event-name', eventName, true); }, 500);
+    renderBadges();
+  });
+
+  function updateHeaderStats(){
+    document.getElementById('headerTotal').textContent = roster.length;
+    const validCheckedIn = roster.filter(a=> checkedInIds.has(a.id)).length;
+    document.getElementById('headerCheckedIn').textContent = validCheckedIn;
+    return validCheckedIn;
+  }
+
+  // ================= IMPORT =================
+  const methodButtons = Array.from(document.querySelectorAll('#methodSwitch button'));
+  const importBoxes = {
+    file: document.getElementById('importBoxFile'),
+    link: document.getElementById('importBoxLink'),
+    paste: document.getElementById('importBoxPaste'),
+  };
+  methodButtons.forEach(b=> b.addEventListener('click', ()=>{
+    methodButtons.forEach(x=> x.classList.toggle('active', x===b));
+    Object.keys(importBoxes).forEach(k=> importBoxes[k].style.display = (k===b.dataset.method) ? '' : 'none');
+  }));
+
+  function guessField(fields, keywords, excludeKeywords){
+    const exclude = excludeKeywords || [];
+    const lower = fields.map(f=> ({f, l: String(f).toLowerCase()}));
+    for(const kw of keywords){
+      const hit = lower.find(x=> x.l.includes(kw) && !exclude.some(ex=> x.l.includes(ex)));
+      if(hit) return hit.f;
+    }
+    return '';
+  }
+
+  function handleParsed(fields, rows){
+    pendingImport = {fields, rows};
+    const sel = (id)=> document.getElementById(id);
+    const opts = ['<option value="">(ไม่ใช้)</option>'].concat(
+      fields.map(f=> `<option value="${escapeHtml(f)}">${escapeHtml(f)}</option>`)
+    ).join('');
+    ['mapTimestamp','mapTitle','mapName','mapPosition','mapOrg','mapEmail','mapPhone'].forEach(id=> sel(id).innerHTML = opts);
+
+    const guesses = {
+      mapTimestamp: guessField(fields, ['ประทับเวลา','timestamp','วันที่ลงทะเบียน']),
+      mapTitle: guessField(fields, ['คำนำหน้า','คำนำหน้าชื่อ','title','prefix']),
+      mapName: guessField(fields, ['ชื่อ-นามสกุล','ชื่อ','full name','fullname','name'], ['คำนำหน้า']),
+      mapPosition: guessField(fields, ['ตำแหน่ง','position','job title','role']),
+      mapOrg: guessField(fields, ['หน่วยงาน','สังกัด','กอง','ฝ่าย','คณะ','สำนักงาน','organization','department','affiliation']),
+      mapEmail: guessField(fields, ['อีเมล','email','e-mail']),
+      mapPhone: guessField(fields, ['เบอร์โทร','เบอร์','โทรศัพท์','มือถือ','phone','tel']),
+    };
+    Object.keys(guesses).forEach(id=>{ if(guesses[id]) sel(id).value = guesses[id]; });
+
+    document.getElementById('parseSummary').textContent =
+      `พบ ${rows.length} แถว, ${fields.length} คอลัมน์ — ตรวจสอบการจับคู่คอลัมน์ด้านล่างก่อนนำเข้า`;
+    document.getElementById('mappingSection').style.display = '';
+    renderPreview();
+  }
+
+  function currentMap(){
+    return {
+      timestamp: document.getElementById('mapTimestamp').value,
+      title: document.getElementById('mapTitle').value,
+      name: document.getElementById('mapName').value,
+      position: document.getElementById('mapPosition').value,
+      org: document.getElementById('mapOrg').value,
+      email: document.getElementById('mapEmail').value,
+      phone: document.getElementById('mapPhone').value,
+    };
+  }
+
+  function renderPreview(){
+    if(!pendingImport) return;
+    const map = currentMap();
+    const rows = pendingImport.rows;
+    let html = '<thead><tr><th>#</th><th>ประทับเวลา</th><th>คำนำหน้าชื่อ</th><th>ชื่อ-นามสกุล</th><th>ตำแหน่ง</th><th>สังกัด/หน่วยงาน</th><th>อีเมล</th><th>เบอร์โทร</th></tr></thead><tbody>';
+    rows.forEach((row, i)=>{
+      html += `<tr>
+        <td>${i + 1}</td>
+        <td>${escapeHtml(map.timestamp ? row[map.timestamp] : '')}</td>
+        <td>${escapeHtml(map.title ? row[map.title] : '')}</td>
+        <td class="name">${escapeHtml(map.name ? row[map.name] : '')}</td>
+        <td>${escapeHtml(map.position ? row[map.position] : '')}</td>
+        <td>${escapeHtml(map.org ? row[map.org] : '')}</td>
+        <td>${escapeHtml(map.email ? row[map.email] : '')}</td>
+        <td>${escapeHtml(map.phone ? row[map.phone] : '')}</td>
+      </tr>`;
+    });
+    html += '</tbody>';
+    document.getElementById('previewTable').innerHTML = html;
+    document.getElementById('confirmImportBtn').disabled = !map.name;
+  }
+  ['mapTimestamp','mapTitle','mapName','mapPosition','mapOrg','mapEmail','mapPhone'].forEach(id=>
+    document.getElementById(id).addEventListener('change', renderPreview)
+  );
+
+  function parseCsvText(text){
+    const result = Papa.parse(text, {header:true, skipEmptyLines:true});
+    const fields = result.meta && result.meta.fields ? result.meta.fields : [];
+    const rows = result.data || [];
+    if(!fields.length || !rows.length){
+      showToast('อ่านข้อมูลไม่สำเร็จ ตรวจสอบรูปแบบ CSV และแถวหัวตาราง', 'err');
+      return;
+    }
+    handleParsed(fields, rows);
+  }
+
+  document.getElementById('fileInput').addEventListener('change', (e)=>{
+    const file = e.target.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = ()=> parseCsvText(reader.result);
+    reader.onerror = ()=> showToast('อ่านไฟล์ไม่สำเร็จ', 'err');
+    reader.readAsText(file, 'UTF-8');
+  });
+
+  document.getElementById('parsePasteBtn').addEventListener('click', ()=>{
+    const text = document.getElementById('pasteInput').value.trim();
+    if(!text){ showToast('ยังไม่มีข้อมูลให้อ่าน', 'warn'); return; }
+    parseCsvText(text);
+  });
+
+  document.getElementById('fetchLinkBtn').addEventListener('click', async ()=>{
+    const url = document.getElementById('linkInput').value.trim();
+    if(!url){ showToast('ใส่ลิงก์ก่อน', 'warn'); return; }
+    const btn = document.getElementById('fetchLinkBtn');
+    btn.disabled = true; btn.textContent = 'กำลังดึงข้อมูล...';
+    try{
+      const res = await fetch(url);
+      if(!res.ok) throw new Error('http ' + res.status);
+      const text = await res.text();
+      parseCsvText(text);
+    }catch(err){
+      showToast('ดึงข้อมูลจากลิงก์ไม่สำเร็จ (อาจไม่ใช่ลิงก์สาธารณะ) ลองวางข้อความ CSV แทน', 'err');
+    }finally{
+      btn.disabled = false; btn.textContent = 'ดึงข้อมูล';
+    }
+  });
+
+  document.getElementById('cancelImportBtn').addEventListener('click', ()=>{
+    pendingImport = null;
+    document.getElementById('mappingSection').style.display = 'none';
+    document.getElementById('pasteInput').value = '';
+    document.getElementById('linkInput').value = '';
+    document.getElementById('fileInput').value = '';
+  });
+
+  function mergeRoster(existingRoster, rows, map){
+    const existingIds = new Set(existingRoster.map(a=> a.id));
+    const byEmail = new Map(existingRoster.filter(a=> a.email).map(a=> [a.email.toLowerCase(), a]));
+    const result = existingRoster.slice();
+    let added=0, updated=0, skipped=0;
+    for(const row of rows){
+      const title = (map.title ? row[map.title] : '');
+      const titleTrim = (title==null? '': String(title)).trim();
+      const name = (map.name ? row[map.name] : '');
+      const nameTrim = (name==null? '': String(name)).trim();
+      if(!nameTrim){ skipped++; continue; }
+
+      // รวมคำนำหน้าและชื่อเข้าด้วยกัน หากมีคำนำหน้า
+      const fullName = titleTrim ? `${titleTrim} ${nameTrim}` : nameTrim;
+
+      const email = (map.email ? (row[map.email]==null?'':String(row[map.email])) : '').trim();
+      const phone = (map.phone ? (row[map.phone]==null?'':String(row[map.phone])) : '').trim();
+      const position = (map.position ? (row[map.position]==null?'':String(row[map.position])) : '').trim();
+      const org = (map.org ? (row[map.org]==null?'':String(row[map.org])) : '').trim();
+      // ประทับเวลา: ใช้ค่าจากคอลัมน์ที่จับคู่ไว้ (เช่น ประทับเวลาของ Google ฟอร์ม) ถ้าไม่ได้จับคู่หรือว่าง
+      // ให้ใช้เวลาที่นำเข้าตอนนี้แทน
+      const rawTimestamp = (map.timestamp ? row[map.timestamp] : '');
+      const timestampTrim = (rawTimestamp == null ? '' : String(rawTimestamp)).trim();
+      const registeredAt = timestampTrim || new Date().toISOString();
+      const key = email.toLowerCase();
+      if(email && byEmail.has(key)){
+        const existing = byEmail.get(key);
+        existing.name = fullName;
+        existing.title = titleTrim;
+        existing.origName = nameTrim;
+
+        if(phone) existing.phone = phone;
+        if(position) existing.position = position;
+        if(org) existing.org = org;
+        if(timestampTrim) existing.registeredAt = timestampTrim;
+        updated++;
+      } else {
+        const id = generateId(existingIds);
+        existingIds.add(id);
+        const attendee = {id, name:fullName, title:titleTrim, origName:nameTrim, email, phone, position, org, registeredAt, emailStatus:''};
+        result.push(attendee);
+        if(email) byEmail.set(key, attendee);
+        added++;
+      }
+    }
+    return {result, added, updated, skipped};
+  }
+
+  document.getElementById('confirmImportBtn').addEventListener('click', async ()=>{
+    if(!pendingImport) return;
+    const map = currentMap();
+    if(!map.name){ showToast('กรุณาเลือกคอลัมน์ชื่อ-นามสกุล', 'warn'); return; }
+    const btn = document.getElementById('confirmImportBtn');
+    btn.disabled = true; btn.textContent = 'กำลังนำเข้า...';
+    try{
+      const freshRaw = await storeGet('roster', true);
+      const freshRoster = freshRaw ? JSON.parse(freshRaw) : roster;
+      const {result, added, updated, skipped} = mergeRoster(freshRoster, pendingImport.rows, map);
+      const ok = await storeSet('roster', JSON.stringify(result), true);
+      if(!ok){ showToast('บันทึกรายชื่อไม่สำเร็จ ลองใหม่อีกครั้ง', 'err'); return; }
+      roster = result;
+      pendingImport = null;
+      document.getElementById('mappingSection').style.display = 'none';
+      document.getElementById('pasteInput').value = '';
+      document.getElementById('linkInput').value = '';
+      document.getElementById('fileInput').value = '';
+      renderAll();
+      let msg = `นำเข้าสำเร็จ: เพิ่มใหม่ ${added} คน`;
+      if(updated) msg += `, อัปเดต ${updated} คน`;
+      if(skipped) msg += `, ข้าม ${skipped} แถว (ไม่มีชื่อ)`;
+      showToast(msg, 'ok');
+    } finally{
+      btn.disabled = false; btn.textContent = 'นำเข้ารายชื่อนี้';
+    }
+  });
+
+  // ================= BADGES =================
+  function renderBadges(){
+    const grid = document.getElementById('badgesGrid');
+    const countEl = document.getElementById('badgeCount');
+    if(!roster.length){
+      grid.innerHTML = '<p class="empty-hint">ยังไม่มีผู้ลงทะเบียน ไปที่แท็บ "นำเข้ารายชื่อ" เพื่อเพิ่มรายชื่อก่อน</p>';
+      countEl.textContent = '';
+      updateBadgeSelectionUI();
+      return;
+    }
+    countEl.textContent = roster.length + ' ใบ';
+    grid.innerHTML = roster.map(a=> {
+      const isSelected = selectedBadgeIds.has(a.id);
+      return `
+      <div class="badge-card${isSelected ? ' selected' : ''}" data-id="${a.id}">
+        <label class="badge-select">
+          <input type="checkbox" class="badge-checkbox" data-id="${a.id}" ${isSelected ? 'checked' : ''}>
+        </label>
+        <div class="badge-info">
+          <div class="badge-event">${escapeHtml(eventName || 'บัตรลงทะเบียนเข้างาน')}</div>
+          <div class="badge-name">${escapeHtml(a.name)}</div>
+          ${a.position ? `<div class="badge-position">${escapeHtml(a.position)}</div>` : ''}
+          ${a.org ? `<div class="badge-org">${escapeHtml(a.org)}</div>` : ''}
+          <div class="badge-code">
+            <span>ID: ${a.id}</span>
+            <button class="btn-email share-qr-btn" data-id="${a.id}" data-name="${escapeHtml(a.name)}">📤 แชร์/โหลด QR รูปภาพ</button>
+          </div>
+        </div>
+        <div class="badge-stub">
+          <div class="qr-box" id="qr-${a.id}"></div>
+        </div>
+      </div>
+    `}).join('');
+    roster.forEach(a=>{
+      const el = document.getElementById('qr-'+a.id);
+      if(el){
+        el.innerHTML = '';
+        new QRCode(el, {text:a.id, width:104, height:104, colorDark:'#12172B', colorLight:'#ffffff', correctLevel:QRCode.CorrectLevel.M});
+      }
+    });
+    // ตัด id ที่ถูกลบ/ไม่มีในรายชื่อแล้วออกจากการเลือกไว้
+    const rosterIds = new Set(roster.map(a=> a.id));
+    Array.from(selectedBadgeIds).forEach(id=>{ if(!rosterIds.has(id)) selectedBadgeIds.delete(id); });
+    updateBadgeSelectionUI();
+  }
+
+  // ป้าย/ปุ่มยืนยันของแต่ละโหมดการเลือก
+  const SELECTION_MODE_INFO = {
+    print:  { label: 'กำลังเลือกรายการที่จะพิมพ์บัตร',      confirm: 'พิมพ์' },
+    email:  { label: 'กำลังเลือกรายการที่จะส่งอีเมล QR',    confirm: 'ส่งอีเมล' },
+    delete: { label: 'กำลังเลือกรายการที่จะลบ',             confirm: 'ลบ' },
+  };
+
+  function updateBadgeSelectionUI(){
+    const selectAllEl = document.getElementById('selectAllBadges');
+    const selectedCountEl = document.getElementById('selectedCount');
+    const confirmBtn = document.getElementById('confirmSelectionBtn');
+    const n = selectedBadgeIds.size;
+    selectedCountEl.textContent = n ? `เลือกไว้ ${n} จาก ${roster.length} คน` : 'ยังไม่ได้เลือกรายการ';
+    if(selectionAction){
+      confirmBtn.textContent = `${SELECTION_MODE_INFO[selectionAction].confirm} (${n})`;
+      confirmBtn.disabled = n === 0;
+    }
+    if(!roster.length){
+      selectAllEl.checked = false;
+      selectAllEl.indeterminate = false;
+      selectAllEl.disabled = true;
+      return;
+    }
+    selectAllEl.disabled = false;
+    selectAllEl.checked = n > 0 && n === roster.length;
+    selectAllEl.indeterminate = n > 0 && n < roster.length;
+  }
+
+  function enterSelectionMode(action){
+    selectionAction = action;
+    selectedBadgeIds.clear();
+    document.getElementById('actionButtons').hidden = true;
+    document.getElementById('selectionBar').hidden = false;
+    document.getElementById('selectionBarLabel').textContent = SELECTION_MODE_INFO[action].label;
+    document.getElementById('badgesGrid').classList.add('selecting');
+    document.getElementById('emailTestModeRow').hidden = action !== 'email';
+    document.getElementById('emailTestModeCheckbox').checked = false;
+    document.getElementById('emailTestModeAddress').value = '';
+    document.getElementById('emailTestModeAddress').disabled = true;
+    renderBadges();
+  }
+
+  function exitSelectionMode(){
+    selectionAction = null;
+    selectedBadgeIds.clear();
+    document.getElementById('actionButtons').hidden = false;
+    document.getElementById('selectionBar').hidden = true;
+    document.getElementById('badgesGrid').classList.remove('selecting');
+    renderBadges();
+  }
+
+  document.getElementById('emailTestModeCheckbox').addEventListener('change', (e)=>{
+    document.getElementById('emailTestModeAddress').disabled = !e.target.checked;
+    if(e.target.checked) document.getElementById('emailTestModeAddress').focus();
+  });
+
+  document.getElementById('printBtn').addEventListener('click', ()=>{
+    if(!roster.length){ showToast('ยังไม่มีผู้ลงทะเบียน', 'warn'); return; }
+    enterSelectionMode('print');
+  });
+  document.getElementById('emailBtn').addEventListener('click', ()=>{
+    if(!roster.length){ showToast('ยังไม่มีผู้ลงทะเบียน', 'warn'); return; }
+    enterSelectionMode('email');
+  });
+  document.getElementById('deleteBtn').addEventListener('click', ()=>{
+    if(!roster.length){ showToast('ยังไม่มีผู้ลงทะเบียน', 'warn'); return; }
+    enterSelectionMode('delete');
+  });
+  document.getElementById('cancelSelectionBtn').addEventListener('click', exitSelectionMode);
+
+  document.getElementById('confirmSelectionBtn').addEventListener('click', async ()=>{
+    if(!selectedBadgeIds.size) return;
+    const targets = roster.filter(a=> selectedBadgeIds.has(a.id));
+    const action = selectionAction;
+    if(action === 'print') await doPrintBadges(targets);
+    else if(action === 'email') await doEmailBadges(targets);
+    else if(action === 'delete') await doDeleteBadges(targets);
+  });
+
+  document.getElementById('selectAllBadges').addEventListener('change', (e)=>{
+    if(e.target.checked){ roster.forEach(a=> selectedBadgeIds.add(a.id)); }
+    else { selectedBadgeIds.clear(); }
+    renderBadges();
+  });
+
+  document.getElementById('badgesGrid').addEventListener('change', (e)=>{
+    const cb = e.target.closest('.badge-checkbox');
+    if(!cb) return;
+    const id = cb.dataset.id;
+    if(cb.checked) selectedBadgeIds.add(id); else selectedBadgeIds.delete(id);
+    const card = cb.closest('.badge-card');
+    if(card) card.classList.toggle('selected', cb.checked);
+    updateBadgeSelectionUI();
+  });
+
+  // เพิ่ม Event Listener สำหรับปุ่มแชร์/ดาวน์โหลดรูปภาพ QR Code
+  document.getElementById('badgesGrid').addEventListener('click', async (e)=>{
+    const btn = e.target.closest('.share-qr-btn');
+    if(!btn) return;
+
+    const id = btn.dataset.id;
+    const name = btn.dataset.name;
+    const qrBox = document.getElementById('qr-' + id);
+    if(!qrBox) return;
+
+    // ดึงภาพจาก Canvas หรือ Img ที่ไลบรารี QRCode สร้างไว้
+    const canvas = qrBox.querySelector('canvas');
+    const img = qrBox.querySelector('img');
+    let dataUrl = '';
+    if (canvas && canvas.toDataURL) {
+      dataUrl = canvas.toDataURL('image/png');
+    } else if (img && img.src) {
+      dataUrl = img.src;
+    }
+
+    if(!dataUrl){
+      showToast('ยังสร้างรูปไม่เสร็จ โปรดรอสักครู่', 'warn');
+      return;
+    }
+
+    try {
+      // แปลงข้อมูลรูปภาพ (base64) ให้กลายเป็นก้อนไฟล์ (Blob)
+      const res = await fetch(dataUrl);
+      const blob = await res.blob();
+      const filename = `QR_${name.replace(/\s+/g, '_')}_${id}.png`;
+      const file = new File([blob], filename, { type: 'image/png' });
+
+      const textBody = `สวัสดีคุณ ${name},\nนี่คือรหัสสำหรับเช็คอินเข้างาน "${eventName || 'งานอีเวนต์'}"\nรหัสของคุณคือ: ${id}\n\nโปรดแสดงรูป QR Code นี้ที่หน้างาน`;
+
+      // ตรวจสอบว่าเบราว์เซอร์และเครื่องที่ใช้ รองรับการโยนไฟล์รูปภาพแชร์ข้ามแอปหรือไม่ (เช่น มือถือ/Mac)
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({
+          files: [file],
+          title: 'บัตรเข้างาน',
+          text: textBody
+        });
+      } else {
+        // หากไม่รองรับการส่งผ่านแอป (เช่น PC ทั่วไป) จะเปลี่ยนเป็นการโหลดรูปภาพลงเครื่องแทน
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(a.href);
+        showToast('ดาวน์โหลดรูปแล้ว (นำไปแนบในอีเมลหรือแชทได้เลย)', 'ok');
+      }
+    } catch(err){
+      // ผู้ใช้อาจกดกดยกเลิกตอนหน้าต่างแชร์เด้งขึ้นมา
+      console.log('Share canceled or failed:', err);
+    }
+  });
+
+  function getBadgeQrDataUrl(id){
+    const qrBox = document.getElementById('qr-' + id);
+    if(!qrBox) return '';
+    const canvas = qrBox.querySelector('canvas');
+    const img = qrBox.querySelector('img');
+    if(canvas && canvas.toDataURL) return canvas.toDataURL('image/png');
+    if(img && img.src) return img.src;
+    return '';
+  }
+
+  // เรียกจากปุ่ม "ยืนยัน" ใน selection bar (ดู confirmSelectionBtn ด้านบน) — targets คือรายชื่อที่ติ๊กไว้เท่านั้น
+
+  async function doPrintBadges(targets){
+    const idSet = new Set(targets.map(a=> a.id));
+    const grid = document.getElementById('badgesGrid');
+    exitSelectionMode();
+    activateTab('badges');
+    // ทำเครื่องหมายเฉพาะใบที่จะพิมพ์ไว้ชั่วคราว แล้วให้ CSS ซ่อนที่เหลือตอนสั่งพิมพ์
+    grid.querySelectorAll('.badge-card').forEach(card=>{
+      card.classList.toggle('print-only', idSet.has(card.dataset.id));
+    });
+    grid.classList.add('print-selected-only');
+    const cleanup = ()=>{
+      grid.classList.remove('print-selected-only');
+      grid.querySelectorAll('.badge-card.print-only').forEach(card=> card.classList.remove('print-only'));
+      window.removeEventListener('afterprint', cleanup);
+    };
+    window.addEventListener('afterprint', cleanup);
+    setTimeout(()=> window.print(), 80);
+  }
+
+  async function doEmailBadges(targets){
+    const withEmail = targets.filter(a=> a.email);
+    const withoutEmail = targets.length - withEmail.length;
+    if(!withEmail.length){ showToast('รายการที่เลือกไม่มีอีเมลเลย', 'warn'); return; }
+
+    // โหมดทดสอบ: ส่งทุกฉบับไปที่อีเมลเดียว (เช่นเดียวกับตอนที่ยังไม่ได้ verify โดเมนกับ Resend
+    // ซึ่งส่งได้เฉพาะอีเมลที่สมัครบัญชี Resend ไว้เท่านั้น) — เนื้อหาแต่ละฉบับยังใส่ชื่อ/รหัสของ
+    // คนนั้นๆ ถูกต้อง แค่ที่อยู่ผู้รับถูกเปลี่ยนเป็นอีเมลทดสอบแทน
+    const testModeOn = document.getElementById('emailTestModeCheckbox').checked;
+    const testAddress = document.getElementById('emailTestModeAddress').value.trim();
+    if(testModeOn && !testAddress){
+      showToast('กรุณากรอกอีเมลปลายทางสำหรับโหมดทดสอบ', 'warn');
+      return;
+    }
+
+    const confirmMsg = testModeOn
+      ? `[โหมดทดสอบ] ส่งอีเมล QR ของ ${withEmail.length} คนไปที่ ${testAddress} ทั้งหมด${withoutEmail ? ` (ข้าม ${withoutEmail} คนที่ไม่มีอีเมล)` : ''}?`
+      : `ส่งอีเมล QR ให้ ${withEmail.length} คนที่มีอีเมล${withoutEmail ? ` (ข้าม ${withoutEmail} คนที่ไม่มีอีเมล)` : ''}?\n\nหมายเหตุ: ถ้ายังไม่ได้ verify โดเมนกับ Resend จะส่งได้เฉพาะอีเมลที่สมัครบัญชี Resend ไว้เท่านั้น อีเมลอื่นจะส่งไม่สำเร็จ`;
+    if(!confirm(confirmMsg)) return;
+
+    const btn = document.getElementById('confirmSelectionBtn');
+    btn.disabled = true;
+    let sent = 0, failed = 0;
+    let lastErrorMsg = ''; // เก็บข้อความ error ล่าสุดไว้โชว์ตอนจบ ช่วยวินิจฉัยว่าทำไมส่งไม่สำเร็จ
+    const sentIds = []; // เก็บ id ที่ส่งสำเร็จ (เฉพาะตอนไม่ใช่โหมดทดสอบ) ไว้อัปเดต Email Status
+    for(let i = 0; i < withEmail.length; i++){
+      const a = withEmail[i];
+      btn.textContent = `กำลังส่ง (${i + 1}/${withEmail.length})...`;
+      const dataUrl = getBadgeQrDataUrl(a.id);
+      const contentBase64 = dataUrl.includes(',') ? dataUrl.split(',')[1] : '';
+      const currentEventName = eventName || 'งานอีเวนต์';
+      const html = `
+        ${testModeOn ? `<p style="color:#B4791C">[โหมดทดสอบ] ฉบับนี้ตั้งใจจะส่งถึง: ${escapeHtml(a.name)} &lt;${escapeHtml(a.email)}&gt;</p>` : ''}
+        <p>สวัสดีคุณ ${escapeHtml(a.name)},</p>
+        <p>นี่คือรหัสสำหรับเช็คอินเข้างาน "${escapeHtml(currentEventName)}"</p>
+        <p>รหัสของคุณคือ: <b>${a.id}</b></p>
+        <p>โปรดแสดงรูป QR Code ที่แนบมานี้ที่หน้างานเพื่อเช็คอิน</p>
+      `;
+      const subject = testModeOn
+        ? `[ทดสอบ] บัตรเข้างาน: ${currentEventName} (${a.name})`
+        : `บัตรเข้างาน: ${currentEventName}`;
+      try{
+        const res = await fetch('/api/send-email', {
+          method: 'POST',
+          headers: apiHeaders({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify({
+            to: testModeOn ? testAddress : a.email,
+            subject,
+            html,
+            attachment: contentBase64 ? { filename: `QR_${a.id}.png`, contentBase64 } : undefined,
+          }),
+        });
+        if(res.ok){
+          sent++;
+          if(!testModeOn) sentIds.push(a.id); // โหมดทดสอบไม่ถือว่าส่งถึงตัวจริง ไม่นับ Email Status
+        } else {
+          failed++;
+          const errData = await res.json().catch(()=> ({}));
+          lastErrorMsg = errData.error || `HTTP ${res.status}`;
+          console.error('ส่งอีเมลไม่สำเร็จ:', a.email, res.status, errData);
+        }
+      } catch(e){
+        failed++;
+        lastErrorMsg = e.message || String(e);
+        console.error('ส่งอีเมลไม่สำเร็จ (network):', a.email, e);
+      }
+      if(i < withEmail.length - 1) await new Promise(r=> setTimeout(r, 400));
+    }
+
+    // บันทึกสถานะ "ส่งแล้ว" ลง Email Status ของแต่ละคนที่ส่งสำเร็จจริง
+    if(sentIds.length){
+      const freshRaw = await storeGet('roster', true);
+      const freshRoster = freshRaw ? JSON.parse(freshRaw) : roster;
+      const sentIdSet = new Set(sentIds);
+      freshRoster.forEach(a=>{ if(sentIdSet.has(a.id)) a.emailStatus = 'sent'; });
+      const ok = await storeSet('roster', JSON.stringify(freshRoster), true);
+      if(ok){
+        roster = freshRoster;
+      } else {
+        showToast('ส่งอีเมลสำเร็จแต่บันทึกสถานะ Email Status ไม่สำเร็จ ลองกดดาวน์โหลดข้อมูลใหม่ภายหลัง', 'warn');
+      }
+    }
+
+    btn.disabled = false;
+    exitSelectionMode();
+    const failMsg = failed ? `, ล้มเหลว ${failed} คน${lastErrorMsg ? ` (${lastErrorMsg})` : ''}` : '';
+    showToast(`ส่งอีเมลสำเร็จ ${sent} คน${failMsg}`, failed ? (sent ? 'warn' : 'err') : 'ok');
+  }
+
+  async function doDeleteBadges(targets){
+    const ids = targets.map(a=> a.id);
+    if(!confirm(`ลบรายชื่อ ${ids.length} คน (รวมสถานะเช็คอินของคนเหล่านี้)? การกระทำนี้ย้อนกลับไม่ได้`)) return;
+    const btn = document.getElementById('confirmSelectionBtn');
+    btn.disabled = true; btn.textContent = 'กำลังลบ...';
+    try{
+      const freshRaw = await storeGet('roster', true);
+      const freshRoster = freshRaw ? JSON.parse(freshRaw) : roster;
+      const idSet = new Set(ids);
+      const result = freshRoster.filter(a=> !idSet.has(a.id));
+      const ok = await storeSet('roster', JSON.stringify(result), true);
+      if(!ok){ showToast('ลบรายชื่อไม่สำเร็จ ลองใหม่อีกครั้ง', 'err'); btn.disabled = false; return; }
+      for(const id of ids){ await storeDelete('checkin:' + id, true); checkedInIds.delete(id); removeLogEntryFor(id); }
+      roster = result;
+      exitSelectionMode();
+      showToast(`ลบรายชื่อ ${ids.length} คนเรียบร้อย`, 'ok');
+    } finally{
+      btn.disabled = false;
+    }
+  }
+
+  // ================= CHECKIN =================
+  function renderCheckinStats(){
+    const total = roster.length;
+    const checkedIn = roster.filter(a=> checkedInIds.has(a.id)).length;
+    document.getElementById('statTotal').textContent = total;
+    document.getElementById('statCheckedIn').textContent = checkedIn;
+    document.getElementById('statRemaining').textContent = total - checkedIn;
+    updateHeaderStats();
+  }
+
+  let selectedLogIds = new Set(); // id ที่ติ๊กไว้ใน "รายการเช็คอินล่าสุด" เพื่อยกเลิกเช็คอิน
+
+  function addLogEntry(attendee, when){
+    const list = document.getElementById('logList');
+    if(list.querySelector('.log-empty')) list.innerHTML = '';
+    const row = document.createElement('div');
+    row.className = 'log-row';
+    row.dataset.id = attendee.id;
+    const time = when.toLocaleTimeString('th-TH', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+    row.innerHTML = `
+      <input type="checkbox" class="log-checkbox" data-id="${attendee.id}">
+      <span class="log-row-name">${escapeHtml(attendee.name)}</span>
+      <span class="t">${time}</span>
+    `;
+    list.insertBefore(row, list.firstChild);
+    while(list.children.length > 40){
+      const overflow = list.lastChild;
+      if(overflow && overflow.dataset && overflow.dataset.id) selectedLogIds.delete(overflow.dataset.id);
+      list.removeChild(overflow);
+    }
+    updateUndoCheckinUI();
+  }
+
+  // เอาแถวออกจาก "รายการเช็คอินล่าสุด" (ใช้ตอนยกเลิกเช็คอิน หรือ poll เจอว่าคนนี้ถูกยกเลิก
+  // เช็คอินจากเครื่องอื่นไปแล้ว) — ไม่ได้ลบรายชื่อผู้ลงทะเบียน แค่เอาสถานะเช็คอินออก
+  function removeLogEntryFor(id){
+    const list = document.getElementById('logList');
+    const row = list.querySelector(`.log-row[data-id="${id}"]`);
+    if(row) row.remove();
+    selectedLogIds.delete(id);
+    if(!list.children.length) list.innerHTML = '<div class="log-empty">ยังไม่มีการเช็คอิน</div>';
+    updateUndoCheckinUI();
+  }
+
+  function updateUndoCheckinUI(){
+    const list = document.getElementById('logList');
+    const rows = list.querySelectorAll('.log-row');
+    const selectAllEl = document.getElementById('selectAllLogBadges');
+    const undoBtn = document.getElementById('undoCheckinBtn');
+    const n = selectedLogIds.size;
+    undoBtn.disabled = n === 0;
+    if(!rows.length){
+      selectAllEl.checked = false;
+      selectAllEl.indeterminate = false;
+      selectAllEl.disabled = true;
+      return;
+    }
+    selectAllEl.disabled = false;
+    selectAllEl.checked = n > 0 && n === rows.length;
+    selectAllEl.indeterminate = n > 0 && n < rows.length;
+  }
+
+  document.getElementById('logList').addEventListener('change', (e)=>{
+    const cb = e.target.closest('.log-checkbox');
+    if(!cb) return;
+    if(cb.checked) selectedLogIds.add(cb.dataset.id); else selectedLogIds.delete(cb.dataset.id);
+    updateUndoCheckinUI();
+  });
+
+  document.getElementById('selectAllLogBadges').addEventListener('change', (e)=>{
+    const rows = document.getElementById('logList').querySelectorAll('.log-row');
+    rows.forEach(row=>{
+      const cb = row.querySelector('.log-checkbox');
+      if(e.target.checked){ selectedLogIds.add(row.dataset.id); if(cb) cb.checked = true; }
+      else { selectedLogIds.delete(row.dataset.id); if(cb) cb.checked = false; }
+    });
+    updateUndoCheckinUI();
+  });
+
+  async function doUndoCheckins(ids){
+    if(!ids.length) return;
+    if(!confirm(`ยกเลิกการเช็คอินของ ${ids.length} คนที่เลือกไว้? คนเหล่านี้จะกลับไปเป็น "ยังไม่เช็คอิน" และสแกน/ค้นหาเช็คอินใหม่ได้อีกครั้ง`)) return;
+    const btn = document.getElementById('undoCheckinBtn');
+    const originalText = btn.textContent;
+    btn.disabled = true; btn.textContent = 'กำลังลบ...';
+    try{
+      for(const id of ids){
+        await storeDelete('checkin:' + id, true);
+        checkedInIds.delete(id);
+        removeLogEntryFor(id);
+      }
+      renderCheckinStats();
+      renderSearchResults();
+      showToast(`ยกเลิกการเช็คอิน ${ids.length} คนเรียบร้อย`, 'ok');
+    } finally {
+      btn.disabled = false; btn.textContent = originalText;
+    }
+  }
+
+  document.getElementById('undoCheckinBtn').addEventListener('click', ()=>{
+    doUndoCheckins(Array.from(selectedLogIds));
+  });
+
+  document.getElementById('refreshCheckinBtn').addEventListener('click', async ()=>{
+    const btn = document.getElementById('refreshCheckinBtn');
+    const originalText = btn.textContent;
+    btn.disabled = true; btn.textContent = 'กำลังรีเฟรช...';
+    try{
+      await pollCheckins();
+      showToast('รีเฟรชข้อมูลเช็คอินแล้ว', 'ok');
+    } finally {
+      btn.disabled = false; btn.textContent = originalText;
+    }
+  });
+
+  function flashScannerFrame(status){
+    const frame = document.getElementById('scannerFrame');
+    frame.classList.remove('flash-ok','flash-err','flash-warn');
+    void frame.offsetWidth;
+    frame.classList.add('flash-' + status);
+    setTimeout(()=> frame.classList.remove('flash-' + status), 650);
+  }
+
+  async function checkInById(id, opts){
+    opts = opts || {};
+    const attendee = roster.find(a=> a.id === id.toUpperCase());
+    if(!attendee){
+      showToast('ไม่พบรหัสนี้ในระบบ: ' + id, 'err');
+      flashScannerFrame('err');
+      return;
+    }
+    if(checkedInIds.has(attendee.id)){
+      showToast(attendee.name + ' เช็คอินไปแล้ว', 'warn');
+      flashScannerFrame('warn');
+      return;
+    }
+    const ok = await storeSet('checkin:' + attendee.id, new Date().toISOString(), true);
+    if(!ok){
+      showToast('บันทึกการเช็คอินไม่สำเร็จ ลองใหม่อีกครั้ง', 'err');
+      flashScannerFrame('err');
+      return;
+    }
+    checkedInIds.add(attendee.id);
+    addLogEntry(attendee, new Date());
+    renderCheckinStats();
+    renderSearchResults();
+    showToast('เช็คอิน ' + attendee.name + ' สำเร็จ', 'ok');
+    if(!opts.silentFlash) flashScannerFrame('ok');
+  }
+
+  // แสดง popup ให้กดยืนยันก่อนบันทึกเช็คอินจริง (ใช้เฉพาะตอนสแกนกล้อง/ไฟล์รูป —
+  // การเช็คอินจากช่องค้นหาถือว่าผู้ใช้กดปุ่ม "เช็คอิน" เองแล้วคือการยืนยันอยู่แล้ว)
+  // คืนค่า true/false
+  function showCheckinConfirm(attendee){
+    return new Promise(resolve=>{
+      const overlay = document.getElementById('checkinConfirmModal');
+      const yesBtn = document.getElementById('checkinConfirmYes');
+      const noBtn = document.getElementById('checkinConfirmNo');
+      document.getElementById('checkinConfirmMessage').innerHTML =
+        `พบรายชื่อ: <b>${escapeHtml(attendee.name)}</b>` +
+        (attendee.position ? `<br>${escapeHtml(attendee.position)}` : '') +
+        (attendee.org ? `<br>${escapeHtml(attendee.org)}` : '') +
+        `<br>รหัส: ${attendee.id}<br><br>ยืนยันเช็คอินคนนี้ใช่ไหม?`;
+      overlay.hidden = false;
+      function cleanup(result){
+        overlay.hidden = true;
+        yesBtn.onclick = null; noBtn.onclick = null;
+        resolve(result);
+      }
+      yesBtn.onclick = ()=> cleanup(true);
+      noBtn.onclick = ()=> cleanup(false);
+    });
+  }
+
+  let awaitingScanConfirm = false; // กันไม่ให้เด้ง popup ซ้อนกันถ้ากล้องยังสแกนต่อเนื่อง
+
+  async function processScannedCode(rawText){
+    const code = String(rawText || '').trim().toUpperCase();
+    if(!code || awaitingScanConfirm) return;
+    const now = Date.now();
+    if(code === lastScannedCode && now - lastScannedAt < 4000) return;
+    lastScannedCode = code; lastScannedAt = now;
+
+    const attendee = roster.find(a=> a.id === code);
+    if(!attendee){
+      showToast('ไม่พบรหัสนี้ในระบบ: ' + code, 'err');
+      flashScannerFrame('err');
+      return;
+    }
+    if(checkedInIds.has(attendee.id)){
+      showToast(attendee.name + ' เช็คอินไปแล้ว', 'warn');
+      flashScannerFrame('warn');
+      return;
+    }
+
+    awaitingScanConfirm = true;
+    try{
+      const confirmed = await showCheckinConfirm(attendee);
+      if(!confirmed){
+        lastScannedCode = ''; // ยกเลิกแล้วให้สแกนโค้ดเดิมซ้ำได้ทันที ไม่ต้องรอ debounce
+        return;
+      }
+      await checkInById(attendee.id);
+    } finally {
+      awaitingScanConfirm = false;
+    }
+  }
+
+  function setScannerUiRunning(running){
+    document.getElementById('startScanBtn').style.display = running ? 'none' : '';
+    document.getElementById('stopScanBtn').style.display = running ? '' : 'none';
+    document.getElementById('scannerPlaceholder').style.display = running ? 'none' : '';
+  }
+
+  // จัดการ Error หากผู้ใช้ไม่ให้สิทธิ์เปิดกล้อง หรือหากล้องไม่พบ
+  function handleCameraError(err, placeholder) {
+      console.error('camera error:', err);
+      document.getElementById('scannerStatus').textContent = '';
+      let errMsg = err && err.message ? err.message : String(err);
+      const lowerErr = errMsg.toLowerCase();
+
+      if (lowerErr.includes('notallowed') || lowerErr.includes('permission denied')) {
+          errMsg = 'ผู้ใช้ไม่อนุญาตให้ใช้งานกล้อง (กรุณาอนุญาตสิทธิ์กล้องในเบราว์เซอร์)';
+      } else if (lowerErr.includes('notfound') || lowerErr.includes('no camera') || lowerErr.includes('device not found')) {
+          errMsg = 'ไม่พบอุปกรณ์กล้องในเครื่องนี้';
+      }
+
+      placeholder.textContent = 'เปิดกล้องไม่สำเร็จ: ' + errMsg + ' — คุณสามารถค้นหาชื่อด้วยมือหรือสแกนจากไฟล์รูปภาพแทนได้';
+      placeholder.style.display = '';
+      showToast('เปิดกล้องไม่สำเร็จ', 'err');
+      setScannerUiRunning(false);
+  }
+
+  function startScanner(){
+    const placeholder = document.getElementById('scannerPlaceholder');
+    if(!roster.length){
+      placeholder.textContent = 'ยังไม่มีผู้ลงทะเบียน — ไปนำเข้ารายชื่อในแท็บ "นำเข้ารายชื่อ" ก่อน';
+      placeholder.style.display = '';
+      showToast('ยังไม่มีผู้ลงทะเบียนให้เช็คอิน', 'warn');
+      return;
+    }
+
+    if(scannerRunning) return;
+
+    if(typeof Html5Qrcode === 'undefined'){
+      placeholder.textContent = 'โหลดไลบรารีสแกนไม่สำเร็จ (เช็คการเชื่อมต่ออินเทอร์เน็ต แล้วรีเฟรชหน้านี้)';
+      placeholder.style.display = '';
+      showToast('โหลดไลบรารีสแกนไม่สำเร็จ ลองรีเฟรชหน้า', 'err');
+      return;
+    }
+
+    // ตรวจสอบความปลอดภัยเบื้องต้น (getUserMedia ทำงานได้บน HTTPS หรือ Localhost เท่านั้น)
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      placeholder.textContent = 'เบราว์เซอร์ของคุณไม่รองรับการเปิดกล้อง หรือถูกบล็อกเนื่องจากความปลอดภัย (ระบบกล้องต้องใช้งานผ่าน https:// หรือ localhost เท่านั้น)';
+      placeholder.style.display = '';
+      showToast('เบราว์เซอร์ไม่อนุญาตให้ใช้กล้อง (ไม่ใช่ HTTPS)', 'err');
+      return;
+    }
+
+    document.getElementById('scannerStatus').textContent = 'กำลังขอสิทธิ์เข้าถึงกล้อง...';
+    placeholder.style.display = 'none';
+
+    try{
+      html5QrCode = html5QrCode || new Html5Qrcode('reader');
+      const config = { fps: 10, qrbox: { width: 220, height: 220 } };
+      const onScanSuccess = (decodedText) => processScannedCode(decodedText);
+      const onScanFailure = () => { /* ignore per-frame failure */ };
+
+      // [ขั้นที่ 1] ลองเปิดกล้องหลังก่อนเสมอ (สำหรับมือถือ)
+      html5QrCode.start(
+        { facingMode: 'environment' },
+        config,
+        onScanSuccess,
+        onScanFailure
+      ).then(()=>{
+        scannerRunning = true;
+        setScannerUiRunning(true);
+        document.getElementById('scannerStatus').textContent = 'พร้อมสแกน — เล็ง QR ให้อยู่ในกรอบ';
+      }).catch((err)=>{
+        console.warn('Environment camera failed, attempting fallback to any available camera...', err);
+
+        // [ขั้นที่ 2] หากไม่เจอกล้องหลัง (เช่นใน PC/คอมพิวเตอร์) ให้ดึงรายชื่อกล้องทั้งหมดแล้วใช้ตัวแรกแทน
+        Html5Qrcode.getCameras().then(devices => {
+          if (devices && devices.length > 0) {
+            html5QrCode.start(
+              devices[0].id, // ใช้กล้องตัวแรกที่หาเจอ
+              config,
+              onScanSuccess,
+              onScanFailure
+            ).then(()=>{
+              scannerRunning = true;
+              setScannerUiRunning(true);
+              document.getElementById('scannerStatus').textContent = 'พร้อมสแกน — เล็ง QR ให้อยู่ในกรอบ';
+            }).catch(fallbackErr => handleCameraError(fallbackErr, placeholder));
+          } else {
+            handleCameraError(new Error('ไม่พบอุปกรณ์กล้อง'), placeholder);
+          }
+        }).catch(deviceErr => handleCameraError(deviceErr, placeholder));
+      });
+    } catch(err){
+      handleCameraError(err, placeholder);
+    }
+  }
+
+  function stopScanner(){
+    if(html5QrCode && scannerRunning){
+      html5QrCode.stop().then(()=>{
+        try{ html5QrCode.clear(); }catch(e){}
+        scannerRunning = false;
+        setScannerUiRunning(false);
+        document.getElementById('scannerStatus').textContent = '';
+      }).catch(()=>{
+        scannerRunning = false;
+        setScannerUiRunning(false);
+        document.getElementById('scannerStatus').textContent = '';
+      });
+    }
+  }
+
+  document.getElementById('startScanBtn').addEventListener('click', startScanner);
+  document.getElementById('stopScanBtn').addEventListener('click', stopScanner);
+
+  document.getElementById('scanFileInput').addEventListener('change', (e)=>{
+    const file = e.target.files[0];
+    if(!file) return;
+    const tempId = 'file-scan-temp';
+    let holder = document.getElementById(tempId);
+    if(!holder){
+      holder = document.createElement('div');
+      holder.id = tempId;
+      holder.style.display = 'none';
+      document.body.appendChild(holder);
+    }
+    const scanner = new Html5Qrcode(tempId);
+    scanner.scanFile(file, true)
+      .then((decodedText)=>{ processScannedCode(decodedText); })
+      .catch(()=>{ showToast('อ่าน QR จากรูปนี้ไม่ได้ ลองรูปที่ชัดกว่านี้', 'err'); })
+      .finally(()=>{ e.target.value = ''; try{ scanner.clear(); }catch(err){} });
+  });
+
+  function renderSearchResults(){
+    const q = document.getElementById('searchInput').value.trim().toLowerCase();
+    const box = document.getElementById('searchResults');
+    if(!q){ box.innerHTML = ''; return; }
+    const matches = roster.filter(a=>
+      a.name.toLowerCase().includes(q) ||
+      (a.email||'').toLowerCase().includes(q) ||
+      (a.phone||'').includes(q) ||
+      a.id.toLowerCase().includes(q)
+    ).slice(0, 8);
+    if(!matches.length){ box.innerHTML = '<p class="empty-hint">ไม่พบรายชื่อที่ตรงกับคำค้นหา</p>'; return; }
+    box.innerHTML = matches.map(a=>{
+      const done = checkedInIds.has(a.id);
+      return `<div class="result-row">
+        <div class="result-info">
+          <b>${escapeHtml(a.name)}</b>
+          <span>${escapeHtml(a.email || a.phone || a.id)}</span>
+        </div>
+        ${done
+          ? '<span class="badge-pill ok">เช็คอินแล้ว</span>'
+          : `<button class="btn brass small" data-checkin-id="${a.id}">เช็คอิน</button>`}
+      </div>`;
+    }).join('');
+  }
+  document.getElementById('searchInput').addEventListener('input', renderSearchResults);
+  document.getElementById('searchResults').addEventListener('click', (e)=>{
+    const btn = e.target.closest('[data-checkin-id]');
+    if(btn) checkInById(btn.dataset.checkinId);
+  });
+
+  async function pollCheckins(){
+    const keys = await storeList('checkin:', true);
+    const idsNow = new Set(keys.map(k=> k.slice('checkin:'.length)));
+
+    const newIds = [];
+    idsNow.forEach(id=>{ if(!checkedInIds.has(id)){ checkedInIds.add(id); newIds.push(id); } });
+
+    // เจอ id ที่เคยเช็คอินไว้แต่หายไปจาก KV แล้ว — แปลว่ามีคน "ยกเลิกเช็คอิน" จากอีกเครื่องหนึ่ง
+    const removedIds = Array.from(checkedInIds).filter(id=> !idsNow.has(id));
+    removedIds.forEach(id=>{ checkedInIds.delete(id); removeLogEntryFor(id); });
+
+    if(!newIds.length && !removedIds.length) return;
+
+    // เจอเช็คอินใหม่ที่มาจากอุปกรณ์เครื่องอื่น (เครื่องนี้ยังไม่เคย log ไว้) —
+    // ดึงเวลาจริงจาก KV มาแทรกลง "รายการเช็คอินล่าสุด" ให้ตรงกับเครื่องที่กดเช็คอินจริง
+    if(newIds.length){
+      const withTimes = (await Promise.all(newIds.map(async (id)=>{
+        const attendee = roster.find(a=> a.id === id);
+        if(!attendee) return null;
+        const timeStr = await storeGet('checkin:' + id, true);
+        return { attendee, time: timeStr ? new Date(timeStr) : new Date() };
+      }))).filter(Boolean);
+      withTimes.sort((a, b)=> a.time - b.time); // เก่าสุดก่อน เพราะ addLogEntry แทรกไว้บนสุดทีละแถว
+      withTimes.forEach(({attendee, time})=> addLogEntry(attendee, time));
+    }
+
+    renderCheckinStats();
+    renderSearchResults();
+  }
+  function startCheckinPolling(){
+    stopCheckinPolling();
+    checkinPollTimer = setInterval(pollCheckins, 5000);
+  }
+  function stopCheckinPolling(){
+    if(checkinPollTimer){ clearInterval(checkinPollTimer); checkinPollTimer = null; }
+  }
+
+  function escapeCSV(str) {
+    if (str == null) return '';
+    let stringified = String(str);
+    if (stringified.includes(',') || stringified.includes('"') || stringified.includes('\n')) {
+      stringified = '"' + stringified.replace(/"/g, '""') + '"';
+    }
+    return stringified;
+  }
+
+  // จัดรูปแบบวันที่แบบไม่พึ่ง locale — ก่อนหน้านี้ใช้ dt.toLocaleString('th-TH', ...)
+  // ซึ่งได้ปี พ.ศ. (เช่น 2568) มาปนกับรูปแบบวันที่/เดือนที่กำกวม พอเปิดใน Excel มันเดา
+  // locale ผิดแล้วตีความเป็นวันที่มั่วๆ (เช่นกลายเป็นปี 1969) ฟังก์ชันนี้ใช้ปี ค.ศ. ตรงๆ
+  // แบบ DD/MM/YYYY HH:mm:ss ชัดเจน ไม่กำกวม
+  function formatCheckinTimeForCsv(date){
+    const pad = (n)=> String(n).padStart(2, '0');
+    return `${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${date.getFullYear()} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+  }
+
+  function formatTimestampForCsv(a){
+    if(!a.registeredAt) return '';
+    const d = new Date(a.registeredAt);
+    return isNaN(d.getTime()) ? a.registeredAt : formatCheckinTimeForCsv(d);
+  }
+
+  // สูตร =IMAGE(...) ของ Google ชีต ใช้ quickchart.io สร้างรูป QR จากรหัสตรงๆ — ตรงกับ
+  // template ที่ใช้งานอยู่เดิม พอ import เป็น Google ชีตจะเห็นรูป QR ขึ้นในคอลัมน์นี้ทันที
+  // (Excel ทั่วไปจะเห็นเป็นข้อความสูตรเฉยๆ ไม่ได้ render เป็นรูป)
+  function qrImageFormula(id){
+    return `=IMAGE("https://quickchart.io/qr?text=${id}&size=150")`;
+  }
+
+  // สร้างแถวข้อมูลตาม template กลาง: ประทับเวลา, ชื่อ-สกุล, อีเมล, Registration ID,
+  // Email Status, Attendance, QR Code Image — ใช้ร่วมกันทั้งปุ่ม "ดาวน์โหลดข้อมูล"
+  // (แท็บออกบัตร QR) และ "ดาวน์โหลดรายงานเช็คอิน" (แท็บจุดเช็คอิน)
+  function buildMasterCsv(attendees, checkinTimes){
+    let csvContent = '﻿'; // BOM ให้ Excel อ่านภาษาไทยถูกต้อง
+    csvContent += 'ประทับเวลา,ชื่อ-สกุล,อีเมล,Registration ID,Email Status,Attendance,QR Code Image\n';
+    for(const a of attendees){
+      const timeStr = checkinTimes[a.id];
+      const attendance = timeStr ? formatCheckinTimeForCsv(new Date(timeStr)) : '';
+      const emailStatus = a.emailStatus === 'sent' ? 'ส่งแล้ว' : '';
+      csvContent += [
+        escapeCSV(formatTimestampForCsv(a)),
+        escapeCSV(a.name),
+        escapeCSV(a.email || ''),
+        escapeCSV(a.id),
+        escapeCSV(emailStatus),
+        escapeCSV(attendance),
+        qrImageFormula(a.id),
+      ].join(',') + '\n';
+    }
+    return csvContent;
+  }
+
+  // ให้ชื่อไฟล์ export ทุกไฟล์ลงท้ายด้วยวันที่_เวลาปัจจุบันเสมอ กันไฟล์ทับกันเวลาโหลดหลายรอบ
+  function currentTimestampSuffix(){
+    const d = new Date();
+    const pad = (n)=> String(n).padStart(2, '0');
+    return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+  }
+
+  function downloadTextFile(filename, content){
+    const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }
+
+  // ดึงเวลาเช็คอินจริงของทุกคนจาก KV มาเป็น map { id: isoTimeString }
+  async function fetchAllCheckinTimes(){
+    const checkinTimes = {};
+    const keys = await storeList('checkin:', true);
+    for(const k of keys){
+      const timeStr = await storeGet(k, true);
+      checkinTimes[k.slice('checkin:'.length)] = timeStr;
+    }
+    return checkinTimes;
+  }
+
+  document.getElementById('exportRosterBtn').addEventListener('click', async ()=>{
+    if(!roster.length){ showToast('ยังไม่มีผู้ลงทะเบียน', 'warn'); return; }
+    const btn = document.getElementById('exportRosterBtn');
+    const originalText = btn.textContent;
+    btn.disabled = true; btn.textContent = 'กำลังเตรียมไฟล์...';
+    try{
+      const checkinTimes = await fetchAllCheckinTimes();
+      const currentEventName = eventName || 'ไม่ระบุชื่องาน';
+      const sorted = roster.slice().sort((a, b)=> new Date(a.registeredAt || 0) - new Date(b.registeredAt || 0));
+      downloadTextFile(`ข้อมูลลงทะเบียน_${currentEventName}_${currentTimestampSuffix()}.csv`, buildMasterCsv(sorted, checkinTimes));
+    } catch(e){
+      console.error(e);
+      showToast('เกิดข้อผิดพลาดในการส่งออกไฟล์', 'err');
+    } finally {
+      btn.disabled = false; btn.textContent = originalText;
+    }
+  });
+
+  document.getElementById('exportBtn').addEventListener('click', async ()=>{
+    if(checkedInIds.size === 0) {
+      showToast('ยังไม่มีข้อมูลผู้ที่เช็คอินให้ดาวน์โหลด', 'warn');
+      return;
+    }
+    const btn = document.getElementById('exportBtn');
+    btn.disabled = true;
+    btn.textContent = 'กำลังเตรียมไฟล์...';
+    try {
+      const checkinTimes = await fetchAllCheckinTimes();
+      const currentEventName = eventName || 'ไม่ระบุชื่องาน';
+
+      // ดึงเฉพาะคนที่เช็คอินแล้ว และจัดเรียงตามเวลาเช็คอิน
+      const checkedInAttendees = roster.filter(a => checkedInIds.has(a.id));
+      checkedInAttendees.sort((a, b) => {
+        const tA = new Date(checkinTimes[a.id] || 0).getTime();
+        const tB = new Date(checkinTimes[b.id] || 0).getTime();
+        return tA - tB;
+      });
+
+      downloadTextFile(`รายงานเช็คอิน_${currentEventName}_${currentTimestampSuffix()}.csv`, buildMasterCsv(checkedInAttendees, checkinTimes));
+    } catch(e) {
+      console.error(e);
+      showToast('เกิดข้อผิดพลาดในการส่งออกไฟล์', 'err');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '📥 ดาวน์โหลดรายงานเช็คอิน';
+    }
+  });
+
+  async function resetAllData(btn){
+    if(!confirm('ล้างรายชื่อผู้ลงทะเบียนและสถานะเช็คอินทั้งหมดของงานนี้? การกระทำนี้ย้อนกลับไม่ได้')) return;
+    const originalText = btn.textContent;
+    btn.disabled = true; btn.textContent = 'กำลังล้างข้อมูล...';
+    stopScanner();
+    await storeDelete('roster', true);
+    const keys = await storeList('checkin:', true);
+    for(const k of keys){ await storeDelete(k, true); }
+    roster = [];
+    checkedInIds = new Set();
+    selectedLogIds.clear();
+    document.getElementById('logList').innerHTML = '<div class="log-empty">ยังไม่มีการเช็คอิน</div>';
+    updateUndoCheckinUI();
+    renderAll();
+    btn.disabled = false; btn.textContent = originalText;
+    showToast('ล้างข้อมูลเรียบร้อย', 'ok');
+  }
+  document.getElementById('resetBtn').addEventListener('click', (e)=> resetAllData(e.currentTarget));
+
+  // ================= INIT =================
+  function renderAll(){
+    updateHeaderStats();
+    renderBadges();
+    renderCheckinStats();
+    renderSearchResults();
+  }
+
+  async function init(){
+    const name = await storeGet('event-name', true);
+    if(name){ eventName = name; eventNameInput.value = name; }
+    const rosterRaw = await storeGet('roster', true);
+    roster = rosterRaw ? JSON.parse(rosterRaw) : [];
+    const keys = await storeList('checkin:', true);
+    const ids = keys.map(k=> k.slice('checkin:'.length));
+    checkedInIds = new Set(ids);
+
+    // เติมประวัติเช็คอินที่มีอยู่แล้วลงใน "รายการเช็คอินล่าสุด" ตั้งแต่เปิดหน้าครั้งแรก
+    // ไม่งั้นเครื่องที่เพิ่งมาเปิดใหม่จะเห็นแค่ตัวเลขสถิติ แต่ลิสต์ว่างเปล่า ดูเหมือนไม่ซิงก์กับเครื่องอื่น
+    if(ids.length){
+      const withTimes = (await Promise.all(ids.map(async (id)=>{
+        const attendee = roster.find(a=> a.id === id);
+        if(!attendee) return null;
+        const timeStr = await storeGet('checkin:' + id, true);
+        return { attendee, time: timeStr ? new Date(timeStr) : new Date(0) };
+      }))).filter(Boolean);
+      withTimes.sort((a, b)=> a.time - b.time); // เก่าสุดก่อน เพราะ addLogEntry แทรกไว้บนสุดทีละแถว
+      withTimes.forEach(({attendee, time})=> addLogEntry(attendee, time));
+    }
+
+    renderAll();
+  }
+
+  init();
+})();
+</script>
+</body>
+</html>
