@@ -14,5 +14,5 @@ REQUIRE_ACCESS = "true"
 [[d1_databases]]
 binding = "DB"
 database_name = "ofas-meeting-checkin-v2-db"
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
+database_id = "aba0515a-2d16-4966-8e14-01fb5cc19acb"
 migrations_dir = "migrations"
