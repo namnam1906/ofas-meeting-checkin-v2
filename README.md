@@ -1,4 +1,11 @@
-# ระบบลงทะเบียนเข้าร่วมงาน + เช็คอินด้วย QR
+# OFAS Meeting Check-in v2
+
+> Phase 1 moves storage from eventually-consistent KV to D1, removes the browser token,
+> verifies Cloudflare Access JWTs, makes check-in atomic, and restricts the email endpoint.
+> The original production repository remains unchanged.
+>
+> Deployment checklist: [docs/PHASE1_DEPLOY.md](docs/PHASE1_DEPLOY.md)
+
 
 เว็บแอปสำหรับจัดการงานสัมมนา/ประชุม ตั้งแต่นำเข้ารายชื่อผู้ลงทะเบียน ออกบัตรประจำตัวแบบ QR Code จนถึงเช็คอินหน้างานจริง — ใช้งานผ่านเบราว์เซอร์ได้เลย ไม่ต้องติดตั้งโปรแกรมอะไรเพิ่ม
 
