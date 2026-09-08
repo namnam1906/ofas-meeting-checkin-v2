@@ -1115,9 +1115,8 @@
     const withoutEmail = targets.length - withEmail.length;
     if(!withEmail.length){ showToast('รายการที่เลือกไม่มีอีเมลเลย', 'warn'); return; }
 
-    // โหมดทดสอบ: ส่งทุกฉบับไปที่อีเมลเดียว (เช่นเดียวกับตอนที่ยังไม่ได้ verify โดเมนกับ Resend
-    // ซึ่งส่งได้เฉพาะอีเมลที่สมัครบัญชี Resend ไว้เท่านั้น) — เนื้อหาแต่ละฉบับยังใส่ชื่อ/รหัสของ
-    // คนนั้นๆ ถูกต้อง แค่ที่อยู่ผู้รับถูกเปลี่ยนเป็นอีเมลทดสอบแทน
+    // โหมดทดสอบ: ส่งทุกฉบับไปที่อีเมลเดียว โดยเนื้อหาแต่ละฉบับยังใส่ชื่อและรหัส
+    // ของผู้ลงทะเบียนคนนั้นถูกต้อง แต่เปลี่ยนที่อยู่ผู้รับเป็นอีเมลทดสอบแทน
     const testModeOn = document.getElementById('emailTestModeCheckbox').checked;
     const testAddress = document.getElementById('emailTestModeAddress').value.trim();
     if(testModeOn && !testAddress){
@@ -1127,7 +1126,7 @@
 
     const confirmMsg = testModeOn
       ? `[โหมดทดสอบ] ส่งอีเมล QR ของ ${withEmail.length} คนไปที่ ${testAddress} ทั้งหมด${withoutEmail ? ` (ข้าม ${withoutEmail} คนที่ไม่มีอีเมล)` : ''}?`
-      : `ส่งอีเมล QR ให้ ${withEmail.length} คนที่มีอีเมล${withoutEmail ? ` (ข้าม ${withoutEmail} คนที่ไม่มีอีเมล)` : ''}?\n\nหมายเหตุ: ถ้ายังไม่ได้ verify โดเมนกับ Resend จะส่งได้เฉพาะอีเมลที่สมัครบัญชี Resend ไว้เท่านั้น อีเมลอื่นจะส่งไม่สำเร็จ`;
+      : `ส่งอีเมล QR ให้ ${withEmail.length} คนที่มีอีเมล${withoutEmail ? ` (ข้าม ${withoutEmail} คนที่ไม่มีอีเมล)` : ''}?\n\nอีเมลจะส่งผ่านบัญชี Google Workspace ของผู้ดูแลระบบ`;
     if(!confirm(confirmMsg)) return;
 
     const btn = document.getElementById('confirmSelectionBtn');
