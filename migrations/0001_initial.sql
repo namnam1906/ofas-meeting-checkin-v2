@@ -37,7 +37,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS attendees_event_email
 CREATE TABLE IF NOT EXISTS checkins (
   event_id TEXT NOT NULL,
   attendee_id TEXT NOT NULL,
-  checked_in_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  checked_in_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   checked_in_by TEXT,
   device_id TEXT,
   PRIMARY KEY (event_id, attendee_id),
