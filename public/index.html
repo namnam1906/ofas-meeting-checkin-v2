@@ -394,7 +394,7 @@
     <div class="import-box" id="importBoxPaste" style="display:none;">
       <div class="field-row">
         <label>คัดลอกข้อมูลจาก Google ชีตแล้ววางที่นี่ (รวมแถวหัวตาราง)</label>
-        <textarea id="pasteInput" placeholder="ประทับเวลา,คำนำหน้า,ชื่อ-นามสกุล,ตำแหน่ง,หน่วยงาน,อีเมล,เบอร์โทร&#10;..."></textarea>
+        <textarea id="pasteInput" placeholder="คำนำหน้า,ชื่อ-นามสกุล,ตำแหน่ง,หน่วยงาน,อีเมล,เบอร์โทร&#10;..."></textarea>
       </div>
       <div class="btn-row">
         <button class="btn ghost small" id="parsePasteBtn">อ่านข้อมูล</button>
@@ -404,10 +404,6 @@
     <div id="mappingSection" style="display:none;">
       <p class="import-note" id="parseSummary"></p>
       <div class="mapping-grid">
-        <div class="field-row">
-          <label>ประทับเวลา (วันที่ลงทะเบียน)</label>
-          <select id="mapTimestamp"></select>
-        </div>
         <div class="field-row">
           <label>คำนำหน้าชื่อ</label>
           <select id="mapTitle"></select>
@@ -708,10 +704,9 @@
     const opts = ['<option value="">(ไม่ใช้)</option>'].concat(
       fields.map(f=> `<option value="${escapeHtml(f)}">${escapeHtml(f)}</option>`)
     ).join('');
-    ['mapTimestamp','mapTitle','mapName','mapPosition','mapOrg','mapEmail','mapPhone'].forEach(id=> sel(id).innerHTML = opts);
+    ['mapTitle','mapName','mapPosition','mapOrg','mapEmail','mapPhone'].forEach(id=> sel(id).innerHTML = opts);
 
     const guesses = {
-      mapTimestamp: guessField(fields, ['ประทับเวลา','timestamp','วันที่ลงทะเบียน']),
       mapTitle: guessField(fields, ['คำนำหน้า','คำนำหน้าชื่อ','title','prefix']),
       mapName: guessField(fields, ['ชื่อ-นามสกุล','ชื่อ','full name','fullname','name'], ['คำนำหน้า']),
       mapPosition: guessField(fields, ['ตำแหน่ง','position','job title','role']),
@@ -729,7 +724,6 @@
 
   function currentMap(){
     return {
-      timestamp: document.getElementById('mapTimestamp').value,
       title: document.getElementById('mapTitle').value,
       name: document.getElementById('mapName').value,
       position: document.getElementById('mapPosition').value,
@@ -743,11 +737,10 @@
     if(!pendingImport) return;
     const map = currentMap();
     const rows = pendingImport.rows;
-    let html = '<thead><tr><th>#</th><th>ประทับเวลา</th><th>คำนำหน้าชื่อ</th><th>ชื่อ-นามสกุล</th><th>ตำแหน่ง</th><th>สังกัด/หน่วยงาน</th><th>อีเมล</th><th>เบอร์โทร</th></tr></thead><tbody>';
+    let html = '<thead><tr><th>#</th><th>คำนำหน้าชื่อ</th><th>ชื่อ-นามสกุล</th><th>ตำแหน่ง</th><th>สังกัด/หน่วยงาน</th><th>อีเมล</th><th>เบอร์โทร</th></tr></thead><tbody>';
     rows.forEach((row, i)=>{
       html += `<tr>
         <td>${i + 1}</td>
-        <td>${escapeHtml(map.timestamp ? row[map.timestamp] : '')}</td>
         <td>${escapeHtml(map.title ? row[map.title] : '')}</td>
         <td class="name">${escapeHtml(map.name ? row[map.name] : '')}</td>
         <td>${escapeHtml(map.position ? row[map.position] : '')}</td>
@@ -760,7 +753,7 @@
     document.getElementById('previewTable').innerHTML = html;
     document.getElementById('confirmImportBtn').disabled = !map.name;
   }
-  ['mapTimestamp','mapTitle','mapName','mapPosition','mapOrg','mapEmail','mapPhone'].forEach(id=>
+  ['mapTitle','mapName','mapPosition','mapOrg','mapEmail','mapPhone'].forEach(id=>
     document.getElementById(id).addEventListener('change', renderPreview)
   );
 
@@ -834,11 +827,8 @@
       const phone = (map.phone ? (row[map.phone]==null?'':String(row[map.phone])) : '').trim();
       const position = (map.position ? (row[map.position]==null?'':String(row[map.position])) : '').trim();
       const org = (map.org ? (row[map.org]==null?'':String(row[map.org])) : '').trim();
-      // ประทับเวลา: ใช้ค่าจากคอลัมน์ที่จับคู่ไว้ (เช่น ประทับเวลาของ Google ฟอร์ม) ถ้าไม่ได้จับคู่หรือว่าง
-      // ให้ใช้เวลาที่นำเข้าตอนนี้แทน
-      const rawTimestamp = (map.timestamp ? row[map.timestamp] : '');
-      const timestampTrim = (rawTimestamp == null ? '' : String(rawTimestamp)).trim();
-      const registeredAt = timestampTrim || new Date().toISOString();
+      // เก็บเวลานำเข้าอัตโนมัติไว้ภายใน ไม่ต้องให้ผู้ใช้จับคู่คอลัมน์ประทับเวลา
+      const registeredAt = new Date().toISOString();
       const key = email.toLowerCase();
       if(email && byEmail.has(key)){
         const existing = byEmail.get(key);
@@ -849,7 +839,6 @@
         if(phone) existing.phone = phone;
         if(position) existing.position = position;
         if(org) existing.org = org;
-        if(timestampTrim) existing.registeredAt = timestampTrim;
         updated++;
       } else {
         const id = generateId(existingIds);
