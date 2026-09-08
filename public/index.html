@@ -10,9 +10,6 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.7.0/papaparse.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
-<!-- ต้องตั้งค่า Secret ชื่อ STORAGE_TOKEN ที่ค่าเดียวกันนี้ไว้ที่ฝั่ง Cloudflare Worker
-     (Settings > Variables and Secrets) ไม่งั้น /api/storage จะปฏิเสธ request ทั้งหมด (401) -->
-<script>window.STORAGE_CLIENT_TOKEN = '';</script>
 <style>
   :root{
     --ink:#12172B;
@@ -563,19 +560,25 @@
   // Cloudflare KV ไว้ให้ — โค้ดส่วนอื่นทั้งหมดในไฟล์นี้ไม่ต้องแก้ เพราะเรียกผ่าน
   // storeGet/storeSet/storeDelete/storeList อยู่แล้ว
   const STORAGE_API = '/api/storage';
-  // ถ้าตั้งค่า STORAGE_TOKEN ไว้ฝั่ง Pages Function ให้ตั้งค่าเดียวกันไว้ที่นี่ด้วย
-  // (ดูรายละเอียดเรื่องความปลอดภัยใน README.md — วิธีนี้เป็นแค่การกันเบื้องต้น
-  // ไม่ใช่ระบบยืนยันตัวตนที่ปลอดภัยจริง เพราะ token จะฝังอยู่ในโค้ดฝั่งไคลเอนต์)
-  const STORAGE_TOKEN = window.STORAGE_CLIENT_TOKEN || '';
+  const CHECKIN_API = '/api/checkins';
+  const DEVICE_ID_KEY = 'ofas-checkin-device-id';
 
   function apiHeaders(extra){
-    const h = Object.assign({}, extra || {});
-    if(STORAGE_TOKEN) h['X-Storage-Token'] = STORAGE_TOKEN;
-    return h;
+    return Object.assign({}, extra || {});
+  }
+  function getDeviceId(){
+    let id = localStorage.getItem(DEVICE_ID_KEY);
+    if(!id){
+      id = (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2));
+      localStorage.setItem(DEVICE_ID_KEY, id);
+    }
+    return id;
   }
   async function storeGet(key /*, shared */){
     try{
-      const res = await fetch(STORAGE_API + '?key=' + encodeURIComponent(key), { headers: apiHeaders() });
+      const res = await fetch(STORAGE_API + '?key=' + encodeURIComponent(key), {
+        credentials: 'same-origin', headers: apiHeaders()
+      });
       if(!res.ok) return null;
       const data = await res.json();
       return data ? data.value : null;
@@ -585,6 +588,7 @@
     try{
       const res = await fetch(STORAGE_API, {
         method: 'PUT',
+        credentials: 'same-origin',
         headers: apiHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ key, value }),
       });
@@ -594,15 +598,16 @@
   async function storeDelete(key /*, shared */){
     try{
       const res = await fetch(STORAGE_API + '?key=' + encodeURIComponent(key), {
-        method: 'DELETE',
-        headers: apiHeaders(),
+        method: 'DELETE', credentials: 'same-origin', headers: apiHeaders(),
       });
       return res.ok;
     } catch(e){ return false; }
   }
   async function storeList(prefix /*, shared */){
     try{
-      const res = await fetch(STORAGE_API + '?prefix=' + encodeURIComponent(prefix), { headers: apiHeaders() });
+      const res = await fetch(STORAGE_API + '?prefix=' + encodeURIComponent(prefix), {
+        credentials: 'same-origin', headers: apiHeaders()
+      });
       if(!res.ok) return [];
       const data = await res.json();
       return (data && data.keys) ? data.keys : [];
@@ -1167,10 +1172,9 @@
           method: 'POST',
           headers: apiHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({
-            to: testModeOn ? testAddress : a.email,
-            subject,
-            html,
-            attachment: contentBase64 ? { filename: `QR_${a.id}.png`, contentBase64 } : undefined,
+            attendeeId: a.id,
+            testTo: testModeOn ? testAddress : undefined,
+            attachment: contentBase64 ? { contentBase64 } : undefined,
           }),
         });
         if(res.ok){
@@ -1362,19 +1366,38 @@
       flashScannerFrame('err');
       return;
     }
-    if(checkedInIds.has(attendee.id)){
-      showToast(attendee.name + ' เช็คอินไปแล้ว', 'warn');
-      flashScannerFrame('warn');
-      return;
-    }
-    const ok = await storeSet('checkin:' + attendee.id, new Date().toISOString(), true);
-    if(!ok){
-      showToast('บันทึกการเช็คอินไม่สำเร็จ ลองใหม่อีกครั้ง', 'err');
+    const res = await fetch(CHECKIN_API, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: apiHeaders({
+        'Content-Type': 'application/json',
+        'X-Device-Id': getDeviceId(),
+      }),
+      body: JSON.stringify({ attendeeId: attendee.id }),
+    }).catch(()=> null);
+
+    if(!res){
+      showToast('เชื่อมต่อระบบเช็คอินไม่สำเร็จ', 'err');
       flashScannerFrame('err');
       return;
     }
+    const result = await res.json().catch(()=> ({}));
+    if(res.status === 409){
+      checkedInIds.add(attendee.id);
+      showToast(attendee.name + ' เช็คอินไปแล้วเมื่อ ' + new Date(result.checked_in_at).toLocaleTimeString('th-TH'), 'warn');
+      flashScannerFrame('warn');
+      renderCheckinStats();
+      renderSearchResults();
+      return;
+    }
+    if(!res.ok){
+      showToast(result.error || 'บันทึกการเช็คอินไม่สำเร็จ ลองใหม่อีกครั้ง', 'err');
+      flashScannerFrame('err');
+      return;
+    }
+    const checkedAt = result.checked_in_at ? new Date(result.checked_in_at) : new Date();
     checkedInIds.add(attendee.id);
-    addLogEntry(attendee, new Date());
+    addLogEntry(attendee, checkedAt);
     renderCheckinStats();
     renderSearchResults();
     showToast('เช็คอิน ' + attendee.name + ' สำเร็จ', 'ok');
